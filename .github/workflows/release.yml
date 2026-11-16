@@ -1,0 +1,68 @@
+name: release
+
+# Builds Linux binaries from a version tag and attaches them, with checksums, to a
+# GitHub release. Tests run first; nothing is published if they fail.
+#
+#   git tag v0.1.0-fpl.1 && git push origin v0.1.0-fpl.1
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, arch: amd64 }
+          - { runner: ubuntu-24.04-arm, arch: arm64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Vet and test
+        run: |
+          go vet -tags goolm ./...
+          go test -race -tags goolm ./...
+
+      - name: Build
+        run: |
+          ./build.sh -o mautrix-mattermost
+          ./mautrix-mattermost --version
+          archive=mautrix-mattermost-linux-${{ matrix.arch }}.tar.gz
+          tar czf "$archive" mautrix-mattermost
+          sha256sum "$archive" > "$archive.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: |
+            mautrix-mattermost-linux-${{ matrix.arch }}.tar.gz
+            mautrix-mattermost-linux-${{ matrix.arch }}.tar.gz.sha256
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dist
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
