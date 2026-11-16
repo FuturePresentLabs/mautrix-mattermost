@@ -206,6 +206,14 @@ type ChannelRestoredEvent struct {
 	TeamID    string
 }
 
+// ChannelMemberEvent signals that a user joined or left a channel
+// ("user_added" / "user_removed").
+type ChannelMemberEvent struct {
+	ChannelID string
+	UserID    string
+	Added     bool
+}
+
 // DirectAddedEvent signals a DM channel was opened with the local user.
 type DirectAddedEvent struct {
 	ChannelID string
