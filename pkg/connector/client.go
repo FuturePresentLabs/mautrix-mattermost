@@ -42,6 +42,8 @@ type MattermostClient struct {
 	// tests. When nil, the bridge's Matrix connector is used.
 	ghostMXIDFn  func(mmUserID string) id.UserID
 	parseGhostFn func(mxid id.UserID) string
+	// channelMembersFn overrides the channel member fetch in tests.
+	channelMembersFn func(channelID string) ([]*mattermost.ChannelMember, error)
 	// presenceWake wakes the presence poller early (see presence.go). Guarded by mu
 	// because Connect installs it and the websocket loop may already be running.
 	presenceWake chan struct{}
@@ -150,41 +152,16 @@ func (c *MattermostClient) queueChannelResync(ch *mattermost.Channel) {
 		name = &n
 	}
 
-	var otherUserID networkid.UserID
-	memberMap := make(bridgev2.ChatMemberMap)
-	if c.UserID != "" {
-		memberMap[networkid.UserID(c.UserID)] = bridgev2.ChatMember{
-			EventSender: bridgev2.EventSender{
-				Sender:      networkid.UserID(c.UserID),
-				IsFromMe:    true,
-				SenderLogin: c.UserLogin.ID,
-			},
-			Membership: event.MembershipJoin,
-		}
-	}
-
-	// For DMs, resolve the other participant's display name and ID.
-	if ch.IsDM() {
-		otherID := dmOtherUserID(ch.Name, c.UserID)
-		if otherID != "" {
-			otherUserID = networkid.UserID(otherID)
-			memberMap[networkid.UserID(otherID)] = bridgev2.ChatMember{
-				EventSender: bridgev2.EventSender{Sender: networkid.UserID(otherID)},
-				Membership:  event.MembershipJoin,
-			}
+	// For DMs, name the room after the other participant.
+	if ch.IsDM() && name == nil {
+		if otherID := dmOtherUserID(ch.Name, c.UserID); otherID != "" {
 			c.mu.RLock()
-			if u, ok := c.users[otherID]; ok && name == nil {
+			if u, ok := c.users[otherID]; ok {
 				n := u.DisplayName()
 				name = &n
 			}
 			c.mu.RUnlock()
 		}
-	}
-
-	members := &bridgev2.ChatMemberList{
-		IsFull:      ch.IsDM(),
-		MemberMap:   memberMap,
-		OtherUserID: otherUserID,
 	}
 
 	c.queueEvent(&simplevent.ChatResync{
@@ -194,11 +171,15 @@ func (c *MattermostClient) queueChannelResync(ch *mattermost.Channel) {
 			PortalKey:    networkid.PortalKey{ID: networkid.PortalID(ch.ID), Receiver: c.UserLogin.ID},
 			LogContext:   func(z zerolog.Context) zerolog.Context { return z },
 		},
-		ChatInfo: &bridgev2.ChatInfo{
-			Name:        name,
-			Type:        &roomType,
-			Members:     members,
-			CanBackfill: true,
+		// Members are fetched when the portal handles the event, not here, so
+		// the websocket loop never waits on the members request.
+		GetChatInfoFunc: func(ctx context.Context, _ *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
+			return &bridgev2.ChatInfo{
+				Name:        name,
+				Type:        &roomType,
+				Members:     c.chatMembers(ctx, ch),
+				CanBackfill: true,
+			}, nil
 		},
 		CheckNeedsBackfillFunc: func(_ context.Context, _ *database.Message) (bool, error) { return true, nil },
 	})
@@ -480,6 +461,9 @@ func (c *MattermostClient) processEvents() {
 			c.handleChannelDeleted(evt.ChannelID)
 			// If it is only archived, the room stays but becomes read-only.
 			c.queueAccessSync(evt.ChannelID)
+
+		case *mattermost.ChannelMemberEvent:
+			c.handleChannelMemberEvent(evt)
 
 		case *mattermost.DirectAddedEvent:
 			// A new DM was opened. Fetch channel info and queue a resync.

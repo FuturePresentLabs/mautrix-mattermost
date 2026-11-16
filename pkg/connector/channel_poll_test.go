@@ -1,6 +1,8 @@
 package connector
 
 import (
+	"context"
+	"errors"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -69,6 +71,9 @@ func newPollRig(t *testing.T) *pollRig {
 		return cp, true
 	}
 	r.client.reconnectFn = func() { r.reconnect.Add(1) }
+	r.client.channelMembersFn = func(string) ([]*mattermost.ChannelMember, error) {
+		return nil, errors.New("members not scripted")
+	}
 	return r
 }
 
@@ -86,7 +91,11 @@ func assertResyncPreservesPower(t *testing.T, ev bridgev2.RemoteEvent) {
 	if !ok {
 		t.Fatalf("%T is not a ChatResync", ev)
 	}
-	if rs.ChatInfo.Members.PowerLevels != nil {
+	info, err := rs.GetChatInfo(context.Background(), nil)
+	if err != nil || info == nil || info.Members == nil {
+		t.Fatalf("resync has no chat info: %v", err)
+	}
+	if info.Members.PowerLevels != nil {
 		t.Fatal("resync must not override power levels")
 	}
 }
