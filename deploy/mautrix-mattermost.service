@@ -1,0 +1,15 @@
+[Unit]
+Description=mautrix-mattermost bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# The config, database and binary all live together in the bridge directory.
+WorkingDirectory=%h/mautrix-mattermost
+ExecStart=%h/mautrix-mattermost/mautrix-mattermost -c %h/mautrix-mattermost/config.yaml
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
