@@ -3,7 +3,6 @@ package connector
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/rs/zerolog"
 
@@ -11,7 +10,6 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
-	"maunium.net/go/mautrix/format"
 
 	"github.com/bostrot/mautrix-mattermost/pkg/mattermost"
 )
@@ -72,25 +70,8 @@ func (c *MattermostClient) HandleMatrixMessage(ctx context.Context, msg *bridgev
 
 	switch content.MsgType {
 	case event.MsgText, event.MsgNotice, event.MsgEmote:
-		body := content.Body
-		if content.FormattedBody != "" {
-			body = format.HTMLToMarkdown(content.FormattedBody)
-		}
-		// Replace Matrix @mention pills with Mattermost @username mentions.
-		if content.Mentions != nil {
-			for _, mxid := range content.Mentions.UserIDs {
-				ghost, err := c.UserLogin.Bridge.GetGhostByMXID(ctx, mxid)
-				if err != nil || ghost == nil {
-					continue
-				}
-				c.mu.RLock()
-				u, hasUser := c.users[string(ghost.ID)]
-				c.mu.RUnlock()
-				if hasUser {
-					body = strings.ReplaceAll(body, "@"+u.DisplayName(), "@"+u.Username)
-				}
-			}
-		}
+		// Markdown for Mattermost, with mention pills as "@username".
+		body := c.outboundMarkdown(ctx, content)
 		if content.MsgType == event.MsgEmote {
 			body = "_" + body + "_"
 		}
@@ -178,12 +159,7 @@ func (c *MattermostClient) HandleMatrixEdit(ctx context.Context, msg *bridgev2.M
 	if msg.Content.NewContent != nil {
 		src = msg.Content.NewContent
 	}
-	var newBody string
-	if src.FormattedBody != "" {
-		newBody = format.HTMLToMarkdown(src.FormattedBody)
-	} else {
-		newBody = src.Body
-	}
+	newBody := c.outboundMarkdown(ctx, src)
 
 	return wrapSendErr(mattermost.EditPost(c.serverURL(), c.Token, string(msg.EditTarget.ID), newBody))
 }

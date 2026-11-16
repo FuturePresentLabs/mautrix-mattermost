@@ -122,3 +122,21 @@ func TestHTTPToWS_AlreadyWS(t *testing.T) {
 		t.Errorf("httpToWS = %q", got)
 	}
 }
+
+func TestUserDisplayName(t *testing.T) {
+	cases := []struct {
+		u    User
+		want string
+	}{
+		{User{Username: "u", Nickname: "Nick", FirstName: "F"}, "Nick"},
+		{User{Username: "u", FirstName: "First", LastName: "Last"}, "First Last"},
+		{User{Username: "u", FirstName: "First"}, "First"},
+		{User{Username: "u", LastName: "Last"}, "Last"},
+		{User{Username: "u"}, "u"},
+	}
+	for _, tc := range cases {
+		if got := tc.u.DisplayName(); got != tc.want {
+			t.Errorf("DisplayName(%+v) = %q, want %q", tc.u, got, tc.want)
+		}
+	}
+}

@@ -1,7 +1,10 @@
 // Package mattermost provides Go types and helpers for the Mattermost REST and WebSocket API.
 package mattermost
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Post represents a Mattermost post (message).
 type Post struct {
@@ -59,7 +62,7 @@ func (u *User) DisplayName() string {
 	case u.Nickname != "":
 		return u.Nickname
 	case u.FirstName != "" || u.LastName != "":
-		return u.FirstName + " " + u.LastName
+		return strings.TrimSpace(u.FirstName + " " + u.LastName)
 	default:
 		return u.Username
 	}
