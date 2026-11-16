@@ -4,11 +4,17 @@ name: release
 # checksums, to a GitHub release. Tests run first (on the native architecture of
 # each runner); nothing is published if any build fails.
 #
-#   git tag v0.1.0-fpl.2 && git push origin v0.1.0-fpl.2
+# Real release:
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# Rehearsal (builds all four, publishes nothing): run this workflow by hand from
+# the Actions tab, or `gh workflow run release.yml`. Use it to check the artifacts
+# and the version string before creating a tag.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -74,8 +80,11 @@ jobs:
             mautrix-mattermost-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
             mautrix-mattermost-${{ matrix.os }}-${{ matrix.arch }}.tar.gz.sha256
 
+  # Only a tag push publishes; a manual run stops after the build so a rehearsal
+  # can never become a release.
   publish:
     needs: build
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
