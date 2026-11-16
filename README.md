@@ -68,7 +68,7 @@ GOARCH=amd64 CGO_ENABLED=1 ./build.sh
 ### With Beeper / bbctl
 
 ```sh
-bbctl config --type bridgev2 sh-mymattermost -o config.yaml
+bbctl config --type bridgev2 sh-mattermost -o config.yaml
 ./build.sh && ./mautrix-mattermost -c config.yaml
 ```
 
@@ -76,10 +76,12 @@ Or let `bbctl` register the bridge and run the binary for you:
 
 ```sh
 bbctl run --type bridgev2 --no-override-config \
-  --custom-startup-command ./mautrix-mattermost sh-mymattermost
+  --custom-startup-command ./mautrix-mattermost sh-mattermost
 ```
 
-To start over from a clean slate, `bbctl delete sh-mymattermost` removes the bridge and its rooms on the Beeper side (and the local data directory). It does not touch your Mattermost server.
+The bridge name (`sh-mattermost` above) is arbitrary: `sh-` marks a self-hosted bridge in Beeper. Pick any name, but keep it the same in `bbctl config`, `bbctl run` and `bbctl delete`. It is not the bridge type — that is always `bridgev2` for this bridge.
+
+To start over from a clean slate, `bbctl delete sh-mattermost` removes the bridge and its rooms on the Beeper side (and the local data directory). It does not touch your Mattermost server.
 
 ### Standalone
 
