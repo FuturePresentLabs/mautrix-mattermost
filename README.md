@@ -124,7 +124,9 @@ How the lifecycle behaves, and what to watch for:
 - The deferred delete check requires `async_events: false` in the bridge config. `bbctl` generates it that way; if you set it to `true` the bridge keeps rooms instead of deleting them.
 - The bridge polls the channel list about every 30 seconds to catch events the Mattermost websocket missed.
 
-Releases are tagged `vX.Y.Z-fpl.N`. The `main` branch mirrors upstream; this branch (`fpl-main`) is the one to use.
+Releases are tagged with plain semver, starting at `v0.1.0`, and the version the binary reports matches the tag. The `main` branch mirrors upstream; this branch (`fpl-main`) is the one to use.
+
+A fork release does not need to match an upstream version number. Pass `-fpl` as build metadata or a suffix only if you later want to distinguish a fork build from an upstream one.
 
 ## Development
 
