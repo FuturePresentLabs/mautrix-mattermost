@@ -274,6 +274,33 @@ func newClient() *http.Client {
 	return &http.Client{Timeout: 30 * time.Second}
 }
 
+// GetStatusesByIDs returns the Mattermost status ("online", "away", "dnd",
+// "offline") for each of the given user ids.
+//
+// This is a polled endpoint on purpose. Mattermost addresses the websocket
+// status_change event at the affected user alone (NewWebSocketEvent with the user
+// id set), so a bridge connected as one user never learns that anyone else went
+// away. REST is the only source for other people's presence.
+func GetStatusesByIDs(serverURL, token string, userIDs []string) (map[string]string, error) {
+	if len(userIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	var out []struct {
+		UserID string `json:"user_id"`
+		Status string `json:"status"`
+	}
+	if err := doPost(serverURL, token, "/api/v4/users/status/ids", userIDs, &out); err != nil {
+		return nil, err
+	}
+	statuses := make(map[string]string, len(out))
+	for _, status := range out {
+		if status.UserID != "" && status.Status != "" {
+			statuses[status.UserID] = status.Status
+		}
+	}
+	return statuses, nil
+}
+
 func doGet(serverURL, token, path string, out any) error {
 	req, err := http.NewRequest("GET", normalizeURL(serverURL)+path, nil)
 	if err != nil {

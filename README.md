@@ -110,9 +110,8 @@ Send `login` to the bridge bot. Two methods are available:
 
 ## Presence (optional)
 
-Mattermost reports status over the same websocket that carries messages. Set
-`network.presence.enabled: true` to republish those statuses as **Matrix presence**
-on the ghost of the user they belong to:
+Mattermost knows who is around, and the bridge can hand that to Matrix as **presence on
+the ghost of each user**. Set `network.presence.enabled: true`:
 
 | Mattermost | Matrix                                   |
 | ---------- | ---------------------------------------- |
@@ -121,17 +120,22 @@ on the ghost of the user they belong to:
 | `dnd`      | `online`, status message "Do Not Disturb" |
 | `offline`  | `offline`                                |
 
-Off by default: every status change costs one homeserver request, and a homeserver
-that does not store presence gains nothing but the traffic.
+Off by default: every poll costs Mattermost requests, and a homeserver that does not
+store presence gains nothing but the traffic.
+
+Where the status comes from: `POST /api/v4/users/status/ids`, read every 30 seconds for
+the users the bridge knows. It is not pushed, because Mattermost addresses its
+websocket `status_change` event at the affected user's own connections — a bridge
+connected as one user only ever hears about that user.
 
 What it covers, and what it deliberately leaves alone:
 
-- Only users the bridge has already bridged. A status change for someone with no ghost
-  (they never posted in a bridged channel) is skipped, not turned into a new ghost.
+- Only users the bridge has already bridged. A status for someone with no ghost (they
+  never posted in a bridged channel) is skipped, not turned into a new ghost.
 - The logged-in user's own status. Their MXID is a real Matrix account, and presence is
   set by their own clients; the bridge must not fight them.
-- Presence is only pushed on change, so a bridge started after someone went online
-  learns nothing about them until their next change.
+- A user who disappears from the status answer. Silence is not the same as going
+  offline.
 - The homeserver has to support presence. Synapse stores it and shares it with users in
   the same rooms. Beeper's hungryserv serves a narrow Matrix subset and drops it, so a
   Beeper-hosted bridge shows no presence and logs no error.

@@ -144,37 +144,73 @@ func TestPublishPresenceReportsErrors(t *testing.T) {
 	})
 }
 
-// TestHandleStatusChangeIgnoresSelf checks that the logged-in user's own status does
-// not reach the bridge: their MXID is a real Matrix account whose presence is owned by
-// their own clients.
-func TestHandleStatusChangeIgnoresSelf(t *testing.T) {
-	c := &MattermostClient{UserID: "self", presenceUpdates: make(chan presenceUpdate, 4)}
-	c.handleStatusChange(&mattermost.StatusChangeEvent{UserID: "self", Status: "online"})
-	if len(c.presenceUpdates) != 0 {
-		t.Fatalf("queued %d updates for the logged-in user, want 0", len(c.presenceUpdates))
+// TestPresenceDiffPublishesOnlyChanges is the rule that keeps a poll from turning into
+// a flood: unchanged statuses are not republished, and the order is stable so a poll is
+// reproducible in tests and logs.
+func TestPresenceDiffPublishesOnlyChanges(t *testing.T) {
+	previous := map[string]string{"a": "online", "b": "away"}
+	next := map[string]string{"a": "online", "b": "dnd", "c": "offline"}
+
+	updates := presenceDiff(previous, next)
+	if len(updates) != 2 {
+		t.Fatalf("got %d updates, want 2: %+v", len(updates), updates)
 	}
-	c.handleStatusChange(&mattermost.StatusChangeEvent{UserID: "other", Status: "away"})
-	if len(c.presenceUpdates) != 1 {
-		t.Fatalf("queued %d updates for another user, want 1", len(c.presenceUpdates))
+	if updates[0].userID != "b" || updates[0].status != "dnd" {
+		t.Errorf("first update = %+v, want b/dnd", updates[0])
 	}
-	if got := <-c.presenceUpdates; got.userID != "other" || got.status != "away" {
-		t.Errorf("queued %+v, want other/away", got)
+	if updates[1].userID != "c" || updates[1].status != "offline" {
+		t.Errorf("second update = %+v, want c/offline", updates[1])
 	}
 }
 
-// TestQueuePresenceUpdateNeverBlocks covers the rule that status churn cannot stall
-// the websocket loop: with the queue full, new updates are dropped.
-func TestQueuePresenceUpdateNeverBlocks(t *testing.T) {
-	c := &MattermostClient{presenceUpdates: make(chan presenceUpdate, 1)}
-	for i := 0; i < 5; i++ {
-		c.queuePresenceUpdate(presenceUpdate{userID: "abc", status: "online"})
+// TestPresenceDiffFirstPoll covers a cold start: nothing has been published yet, so
+// every known status is a change.
+func TestPresenceDiffFirstPoll(t *testing.T) {
+	updates := presenceDiff(nil, map[string]string{"a": "online", "b": "offline"})
+	if len(updates) != 2 {
+		t.Fatalf("got %d updates, want 2", len(updates))
 	}
-	if len(c.presenceUpdates) != 1 {
-		t.Fatalf("queue holds %d updates, want 1", len(c.presenceUpdates))
+}
+
+// TestPresenceDiffIgnoresMissingUsers pins the rule that a user vanishing from the
+// status answer is silence, not evidence they went offline.
+func TestPresenceDiffIgnoresMissingUsers(t *testing.T) {
+	updates := presenceDiff(map[string]string{"a": "online"}, map[string]string{})
+	if len(updates) != 0 {
+		t.Fatalf("got %d updates for a missing user, want 0", len(updates))
 	}
-	// No publisher installed (presence disabled or before Connect): dropping is fine.
-	empty := &MattermostClient{}
-	empty.queuePresenceUpdate(presenceUpdate{userID: "abc", status: "online"})
+}
+
+// TestPresenceCandidatesSkipsSelf checks that the logged-in user never enters the poll
+// set: their MXID is a real Matrix account whose presence their own clients own.
+func TestPresenceCandidatesSkipsSelf(t *testing.T) {
+	c := &MattermostClient{
+		UserID:       "self",
+		presenceSeen: map[string]string{},
+		users: map[string]*mattermost.User{
+			"self":  {ID: "self", Username: "avery"},
+			"other": {ID: "other", Username: "james"},
+			"":      {},
+		},
+	}
+	got := c.presenceCandidates()
+	if len(got) != 1 || got[0] != "other" {
+		t.Fatalf("candidates = %v, want [other]", got)
+	}
+}
+
+// TestHandleStatusChangeWakesPollerOnce covers the hint path: a status_change frame
+// may arrive in bursts, and the poller only needs one pending wake-up.
+func TestHandleStatusChangeWakesPollerOnce(t *testing.T) {
+	wake := make(chan struct{}, 1)
+	c := &MattermostClient{presenceWake: wake}
+	c.handleStatusChange(&mattermost.StatusChangeEvent{UserID: "other", Status: "away"})
+	c.handleStatusChange(&mattermost.StatusChangeEvent{UserID: "other", Status: "dnd"})
+	if len(wake) != 1 {
+		t.Fatalf("poller woken %d times, want 1", len(wake))
+	}
+	// No poller installed (presence disabled): a hint must be dropped, not panic.
+	(&MattermostClient{}).handleStatusChange(&mattermost.StatusChangeEvent{UserID: "other"})
 }
 
 // TestPresenceConfigDefaultsOff pins the opt-in default. Turning presence on must be a

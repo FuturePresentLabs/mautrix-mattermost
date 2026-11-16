@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"maunium.net/go/mautrix"
@@ -12,24 +13,26 @@ import (
 	"github.com/bostrot/mautrix-mattermost/pkg/mattermost"
 )
 
-// Why this file exists: Mattermost already tells us who is around. Every connected
-// websocket client receives a status_change event whenever a user in the workspace
-// goes online, away, into Do Not Disturb or offline, and pkg/mattermost turns those
-// into StatusChangeEvent. Matrix has no presence in the Desktop API weeper talks to
-// and no bridge-side presence ABI either, so the cheapest way to carry the status
-// out is the one mautrix-go already implements: Matrix presence on the bridged
-// ghost's own MXID.
+// Why this file exists: Mattermost knows who is around, and the bridge can hand that
+// to Matrix as presence on each bridged ghost's MXID, through the one presence API
+// mautrix-go already implements.
 //
-// This is opt-in (network.presence.enabled) for two reasons. It costs one homeserver
-// request per status change, and a homeserver that does not store presence gains
-// nothing but the traffic. Note that presence is only visible on homeservers that
-// implement it: Beeper's hungryserv serves a narrow Matrix subset and drops it, so a
-// Beeper-hosted deployment simply gets no presence, without errors.
+// The status does not arrive over the websocket. Mattermost addresses its
+// status_change event at the affected user's own connections (NewWebSocketEvent with
+// the user id set), so a bridge connected as one user only ever hears about that user.
+// Presence therefore comes from POST /api/v4/users/status/ids, polled for the users the
+// bridge knows. A status_change frame is still useful as a hint that wakes the poller
+// early.
 //
-// What is deliberately not published:
-//   - Only users the bridge has already created a ghost for. A ghost that shares no
-//     room has nobody to show presence to, and resolving status changes for the whole
-//     workspace must not create ghost rows.
+// This is opt-in (network.presence.enabled) for two reasons: it costs a handful of
+// Mattermost requests per interval, and a homeserver that does not store presence gains
+// nothing but the traffic. Presence is only visible on homeservers that implement it:
+// Beeper's hungryserv serves a narrow Matrix subset and drops it, so a Beeper-hosted
+// deployment simply gets no presence, without errors.
+//
+// What is deliberately left alone:
+//   - Users with no ghost. Nothing would see their presence, and polling the whole
+//     workspace must not invent Matrix users.
 //   - The logged-in user's own status. Their MXID belongs to a real Matrix account
 //     whose presence is set by their own clients; the bridge must not fight them.
 
@@ -41,12 +44,13 @@ type PresenceConfig struct {
 }
 
 const (
-	// presenceQueueSize bounds how many status changes may wait for the publisher.
-	// Status churn is low-rate; the buffer only exists so the websocket loop never
-	// blocks on a slow homeserver.
-	presenceQueueSize = 32
+	// presencePollInterval is how often statuses are read. Presence is ambient, so
+	// half a minute of staleness is not worth more traffic.
+	presencePollInterval = 30 * time.Second
+	// presenceBatchSize is how many user ids go into one status request.
+	presenceBatchSize = 100
 	// presenceTimeout bounds one presence request. A homeserver that is slow to
-	// answer must not keep a worker (or a context) alive indefinitely.
+	// answer must not keep the poller blocked indefinitely.
 	presenceTimeout = 15 * time.Second
 )
 
@@ -102,40 +106,105 @@ func publishPresence(ctx context.Context, set presenceSetter, resolve ghostResol
 	return set(ctx, mxid, req)
 }
 
-// startPresencePublisher starts the worker that republishes status changes. The
-// work is detached from the websocket loop: a homeserver answering slowly must not
-// delay message delivery. The worker exits with the connection it was started for.
-func (c *MattermostClient) startPresencePublisher(done <-chan struct{}) {
-	updates := make(chan presenceUpdate, presenceQueueSize)
+// startPresencePoller starts the loop that keeps Matrix presence in step with
+// Mattermost. It runs only when presence is enabled: a disabled bridge must not spend
+// requests finding out.
+func (c *MattermostClient) startPresencePoller(done <-chan struct{}) {
+	if _, ok := c.presenceSetter(); !ok {
+		return
+	}
+	wake := make(chan struct{}, 1)
 	c.mu.Lock()
-	c.presenceUpdates = updates
+	c.presenceWake = wake
+	c.presenceSeen = map[string]string{}
 	c.mu.Unlock()
 	go func() {
+		timer := time.NewTimer(presencePollInterval)
+		defer timer.Stop()
+		// The first pass publishes everyone's current status instead of waiting a
+		// full interval for it.
+		c.pollPresence()
 		for {
 			select {
 			case <-done:
 				return
-			case update := <-updates:
-				c.publishPresence(update)
+			case <-wake:
+			case <-timer.C:
 			}
+			c.pollPresence()
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(presencePollInterval)
 		}
 	}()
 }
 
-// queuePresenceUpdate hands a status change to the worker without blocking. When
-// the queue is full the update is already stale, so the newest one is dropped
-// rather than delaying the websocket loop.
-func (c *MattermostClient) queuePresenceUpdate(update presenceUpdate) {
-	c.mu.RLock()
-	updates := c.presenceUpdates
-	c.mu.RUnlock()
-	if updates == nil {
+// pollPresence reads the status of every user the bridge knows and publishes the ones
+// that changed. A read failure publishes nothing: a partial answer is not evidence
+// that anyone went offline.
+func (c *MattermostClient) pollPresence() {
+	if _, ok := c.presenceSetter(); !ok {
 		return
 	}
-	select {
-	case updates <- update:
-	default:
+	ids := c.presenceCandidates()
+	if len(ids) == 0 {
+		return
 	}
+	statuses := make(map[string]string, len(ids))
+	for start := 0; start < len(ids); start += presenceBatchSize {
+		end := min(start+presenceBatchSize, len(ids))
+		batch, err := mattermost.GetStatusesByIDs(c.serverURL(), c.Token, ids[start:end])
+		if err != nil {
+			lg := c.lifecycleLogger()
+			lg.Debug().Err(err).Msg("Failed to read Mattermost statuses")
+			return
+		}
+		for userID, status := range batch {
+			statuses[userID] = status
+		}
+	}
+	c.mu.Lock()
+	previous := c.presenceSeen
+	c.presenceSeen = statuses
+	c.mu.Unlock()
+	for _, update := range presenceDiff(previous, statuses) {
+		c.publishPresence(update)
+	}
+}
+
+// presenceCandidates lists the Mattermost users worth asking about: everyone whose
+// profile the bridge has resolved, minus the logged-in user, whose presence belongs to
+// their own Matrix clients.
+func (c *MattermostClient) presenceCandidates() []string {
+	c.mu.RLock()
+	ids := make([]string, 0, len(c.users))
+	for userID := range c.users {
+		if userID == "" || (c.UserID != "" && userID == c.UserID) {
+			continue
+		}
+		ids = append(ids, userID)
+	}
+	c.mu.RUnlock()
+	sort.Strings(ids)
+	return ids
+}
+
+// presenceDiff returns the statuses that differ from the previous poll. Users who
+// disappear from the answer are left alone: silence is not the same as going offline.
+func presenceDiff(previous, next map[string]string) []presenceUpdate {
+	updates := make([]presenceUpdate, 0, len(next))
+	for userID, status := range next {
+		if previous[userID] == status {
+			continue
+		}
+		updates = append(updates, presenceUpdate{userID: userID, status: status})
+	}
+	sort.Slice(updates, func(i, j int) bool { return updates[i].userID < updates[j].userID })
+	return updates
 }
 
 // publishPresence sends one status change, if presence is enabled and this build can
@@ -185,13 +254,19 @@ func (c *MattermostClient) presenceSetter() (presenceSetter, bool) {
 	}, true
 }
 
-// handleStatusChange is the websocket entry point for a status_change event.
-func (c *MattermostClient) handleStatusChange(evt *mattermost.StatusChangeEvent) {
-	if evt == nil || evt.UserID == "" {
+// handleStatusChange is the websocket entry point for a status_change event. It is
+// only a hint: Mattermost addresses that event at the affected user's own
+// connections, so the bridge mostly sees its own login's status. Waking the poller
+// just refreshes presence sooner than the next tick.
+func (c *MattermostClient) handleStatusChange(*mattermost.StatusChangeEvent) {
+	c.mu.RLock()
+	wake := c.presenceWake
+	c.mu.RUnlock()
+	if wake == nil {
 		return
 	}
-	if c.UserID != "" && evt.UserID == c.UserID {
-		return // the logged-in user's presence belongs to their own clients
+	select {
+	case wake <- struct{}{}:
+	default:
 	}
-	c.queuePresenceUpdate(presenceUpdate{userID: evt.UserID, status: evt.Status})
 }
