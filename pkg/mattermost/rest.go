@@ -125,6 +125,19 @@ func GetUser(serverURL, token, userID string) (*User, error) {
 	return &u, nil
 }
 
+// GetUsersByUsernames fetches the profiles for a list of usernames in one
+// request. Usernames with no matching user are simply absent from the result.
+func GetUsersByUsernames(serverURL, token string, usernames []string) ([]*User, error) {
+	if len(usernames) == 0 {
+		return nil, nil
+	}
+	var out []*User
+	if err := doPost(serverURL, token, "/api/v4/users/usernames", usernames, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // GetTeams returns the list of teams the authenticated user belongs to.
 func GetTeams(serverURL, token, userID string) ([]*Team, error) {
 	var teams []*Team

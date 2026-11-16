@@ -16,6 +16,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/bridgev2/status"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
 
 	"github.com/bostrot/mautrix-mattermost/pkg/mattermost"
 )
@@ -35,6 +36,12 @@ type MattermostClient struct {
 	mu       sync.RWMutex
 	channels map[string]*mattermost.Channel // keyed by channel ID
 	users    map[string]*mattermost.User    // keyed by user ID
+	// mentions caches username lookups for @mentions (see mentions.go).
+	mentions mentionCache
+	// ghostMXIDFn and parseGhostFn override the ghost <-> Matrix ID mapping in
+	// tests. When nil, the bridge's Matrix connector is used.
+	ghostMXIDFn  func(mmUserID string) id.UserID
+	parseGhostFn func(mxid id.UserID) string
 	// presenceWake wakes the presence poller early (see presence.go). Guarded by mu
 	// because Connect installs it and the websocket loop may already be running.
 	presenceWake chan struct{}
@@ -681,10 +688,8 @@ func (c *MattermostClient) sendNotice(channelID networkid.PortalID, body string)
 // editContent is the new content for an edited post. Linked posts are quoted
 // again, so an edit does not drop the quote the original message carried.
 func (c *MattermostClient) editContent(ctx context.Context, post *mattermost.Post) *event.MessageEventContent {
-	content := &event.MessageEventContent{
-		MsgType: event.MsgText,
-		Body:    post.Message,
-	}
+	rendered := c.renderPostText(ctx, post.Message)
+	content := &rendered
 	c.attachPermalinkQuotes(ctx, content, post.Message)
 	return content
 }
