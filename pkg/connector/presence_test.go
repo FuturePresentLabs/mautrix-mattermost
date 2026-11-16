@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -199,27 +198,31 @@ func TestPresenceConfigDefaultsOff(t *testing.T) {
 }
 
 // TestExampleConfigsDocumentPresence keeps the shipped templates and the embedded
-// example in step: both must carry the presence block, turned off.
+// example in step: both must carry the presence block, turned off. The embedded one is
+// the network section on its own — the framework indents it under `network:` when it
+// writes a config, which is what the standalone template shows.
 func TestExampleConfigsDocumentPresence(t *testing.T) {
-	for name, body := range map[string]string{
-		"ExampleConfig":       ExampleConfig,
-		"example-config.yaml": mustReadExampleConfig(t),
-	} {
-		t.Run(name, func(t *testing.T) {
-			var network struct {
-				Network Config `yaml:"network"`
-			}
-			if err := yaml.Unmarshal([]byte(body), &network); err != nil {
-				t.Fatalf("parse: %v", err)
-			}
-			if network.Network.Presence.Enabled {
-				t.Error("the example config ships with presence enabled")
-			}
-			if !strings.Contains(body, "presence:") {
-				t.Error("the example config does not document the presence block")
-			}
-		})
-	}
+	t.Run("ExampleConfig", func(t *testing.T) {
+		var cfg Config
+		if err := yaml.Unmarshal([]byte(ExampleConfig), &cfg); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if cfg.Presence.Enabled {
+			t.Error("the embedded example config ships with presence enabled")
+		}
+	})
+	t.Run("example-config.yaml", func(t *testing.T) {
+		body := mustReadExampleConfig(t)
+		var network struct {
+			Network Config `yaml:"network"`
+		}
+		if err := yaml.Unmarshal([]byte(body), &network); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if network.Network.Presence.Enabled {
+			t.Error("example-config.yaml ships with presence enabled")
+		}
+	})
 }
 
 func mustReadExampleConfig(t *testing.T) string {

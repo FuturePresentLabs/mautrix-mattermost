@@ -38,7 +38,7 @@ type MattermostClient struct {
 	// presenceUpdates feeds the presence worker (see presence.go). Guarded by mu
 	// because Connect installs it and the websocket loop may already be running.
 	presenceUpdates chan presenceUpdate
-	done     chan struct{}                  // closed by Disconnect to stop reconnect loop
+	done            chan struct{} // closed by Disconnect to stop reconnect loop
 
 	// probeChannelFn overrides the channel lifecycle probe in tests. When nil,
 	// mattermost.ProbeChannel is used.

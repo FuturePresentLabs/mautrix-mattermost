@@ -482,10 +482,9 @@ type Config struct {
 
 const ExampleConfig = `# Mattermost Bridge Configuration
 
-network:
-    presence:
-        # Republish Mattermost user statuses (online / away / dnd / offline) as Matrix
-        # presence for each bridged ghost. Off by default: it costs one homeserver
-        # request per status change, and homeservers that drop presence gain nothing.
-        enabled: false
+# Republish Mattermost user statuses (online / away / dnd / offline) as Matrix
+# presence for each bridged ghost. Off by default: it costs one homeserver request
+# per status change, and homeservers that drop presence gain nothing from it.
+presence:
+    enabled: false
 `
