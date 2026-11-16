@@ -5,19 +5,19 @@ import "time"
 
 // Post represents a Mattermost post (message).
 type Post struct {
-	ID        string        `json:"id"`
-	CreateAt  int64         `json:"create_at"`
-	UpdateAt  int64         `json:"update_at"`
-	DeleteAt  int64         `json:"delete_at"`
-	UserID    string        `json:"user_id"`
-	ChannelID string        `json:"channel_id"`
-	RootID    string        `json:"root_id"`  // non-empty when this is a thread reply
+	ID        string `json:"id"`
+	CreateAt  int64  `json:"create_at"`
+	UpdateAt  int64  `json:"update_at"`
+	DeleteAt  int64  `json:"delete_at"`
+	UserID    string `json:"user_id"`
+	ChannelID string `json:"channel_id"`
+	RootID    string `json:"root_id"` // non-empty when this is a thread reply
 	// ReplyCount is only set on thread root posts and counts the replies in the thread.
-	ReplyCount int          `json:"reply_count"`
-	Message   string        `json:"message"`
-	Type      string        `json:"type"`
-	FileIDs   []string      `json:"file_ids,omitempty"`
-	Metadata  *PostMetadata `json:"metadata,omitempty"`
+	ReplyCount int           `json:"reply_count"`
+	Message    string        `json:"message"`
+	Type       string        `json:"type"`
+	FileIDs    []string      `json:"file_ids,omitempty"`
+	Metadata   *PostMetadata `json:"metadata,omitempty"`
 }
 
 // Timestamp returns the post creation time.
@@ -105,14 +105,16 @@ type Reaction struct {
 	PostID    string `json:"post_id"`
 	EmojiName string `json:"emoji_name"`
 	CreateAt  int64  `json:"create_at"`
+	// DeleteAt is non-zero for a removed reaction. Posts normally omit those.
+	DeleteAt int64 `json:"delete_at,omitempty"`
 }
 
 // PostList is the response from the paginated posts endpoint.
 type PostList struct {
-	Order  []string         `json:"order"`
-	Posts  map[string]*Post `json:"posts"`
-	NextPostID string       `json:"next_post_id"`
-	PrevPostID string       `json:"prev_post_id"`
+	Order      []string         `json:"order"`
+	Posts      map[string]*Post `json:"posts"`
+	NextPostID string           `json:"next_post_id"`
+	PrevPostID string           `json:"prev_post_id"`
 }
 
 // --- WebSocket event types ---
@@ -146,9 +148,9 @@ type HelloEvent struct {
 
 // PostedEvent carries a newly created post.
 type PostedEvent struct {
-	Post        *Post
-	ChannelID   string
-	TeamID      string
+	Post      *Post
+	ChannelID string
+	TeamID    string
 	// Channel metadata sent inline by Mattermost – avoids an extra REST round-trip.
 	ChannelType string // "D" = DM, "G" = group DM, "O" = public, "P" = private
 	ChannelName string // raw channel name, e.g. "userId1__userId2" for DMs
