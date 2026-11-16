@@ -162,7 +162,9 @@ func (c *MattermostClient) pollPresence() {
 	if _, ok := c.presenceSetter(); !ok {
 		return
 	}
-	ids := c.presenceCandidates()
+	ctx, cancel := context.WithTimeout(context.Background(), presenceTimeout)
+	defer cancel()
+	ids := c.presenceCandidates(ctx)
 	if len(ids) == 0 {
 		lg := c.lifecycleLogger()
 		lg.Debug().Msg("Presence poll found no mattermost users to ask about")
@@ -195,21 +197,48 @@ func (c *MattermostClient) pollPresence() {
 		Msg("Polled Mattermost statuses")
 }
 
-// presenceCandidates lists the Mattermost users worth asking about: everyone whose
-// profile the bridge has resolved, minus the logged-in user, whose presence belongs to
-// their own Matrix clients.
-func (c *MattermostClient) presenceCandidates() []string {
-	c.mu.RLock()
-	ids := make([]string, 0, len(c.users))
-	for userID := range c.users {
-		if userID == "" || (c.UserID != "" && userID == c.UserID) {
-			continue
+// presenceGhostQuery lists the Mattermost users the bridge has a ghost for. Only
+// ghosts get presence: a Matrix user nobody shares a room with has nobody to show a
+// status to, and polling must not invent users either.
+const presenceGhostQuery = "SELECT id FROM ghost WHERE bridge_id = $1"
+
+// presenceCandidates lists the Mattermost users worth asking about. Ghosts are read
+// from the database rather than from the in-memory user cache, so a restart does not
+// blind the poller until someone happens to post.
+func (c *MattermostClient) presenceCandidates(ctx context.Context) []string {
+	rows, err := c.UserLogin.Bridge.DB.Query(ctx, presenceGhostQuery, c.UserLogin.Bridge.ID)
+	if err != nil {
+		lg := c.lifecycleLogger()
+		lg.Debug().Err(err).Msg("Failed to list ghosts for presence")
+		return nil
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			lg := c.lifecycleLogger()
+			lg.Debug().Err(err).Msg("Failed to read ghost id for presence")
+			return nil
 		}
 		ids = append(ids, userID)
 	}
-	c.mu.RUnlock()
-	sort.Strings(ids)
-	return ids
+	return filterPresenceIDs(ids, c.UserID)
+}
+
+// filterPresenceIDs drops empty ids and the logged-in user, whose MXID is a real
+// Matrix account whose presence their own clients own. Sorted, so a poll is
+// reproducible.
+func filterPresenceIDs(ids []string, selfUserID string) []string {
+	out := make([]string, 0, len(ids))
+	for _, userID := range ids {
+		if userID == "" || (selfUserID != "" && userID == selfUserID) {
+			continue
+		}
+		out = append(out, userID)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // presenceDiff returns the statuses that differ from the previous poll. Users who

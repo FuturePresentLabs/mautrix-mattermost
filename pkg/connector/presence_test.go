@@ -184,21 +184,25 @@ func TestPresenceDiffIgnoresMissingUsers(t *testing.T) {
 	}
 }
 
-// TestPresenceCandidatesSkipsSelf checks that the logged-in user never enters the poll
-// set: their MXID is a real Matrix account whose presence their own clients own.
-func TestPresenceCandidatesSkipsSelf(t *testing.T) {
-	c := &MattermostClient{
-		UserID:       "self",
-		presenceSeen: map[string]string{},
-		users: map[string]*mattermost.User{
-			"self":  {ID: "self", Username: "avery"},
-			"other": {ID: "other", Username: "james"},
-			"":      {},
-		},
-	}
-	got := c.presenceCandidates()
+// TestFilterPresenceIDsSkipsSelf pins the rule that the logged-in user never enters
+// the poll set: their MXID is a real Matrix account whose presence their own clients
+// own.
+func TestFilterPresenceIDsSkipsSelf(t *testing.T) {
+	got := filterPresenceIDs([]string{"other", "self", ""}, "self")
 	if len(got) != 1 || got[0] != "other" {
 		t.Fatalf("candidates = %v, want [other]", got)
+	}
+}
+
+// TestFilterPresenceIDsSorts keeps a poll reproducible: the same ghosts always produce
+// the same request order.
+func TestFilterPresenceIDsSorts(t *testing.T) {
+	got := filterPresenceIDs([]string{"c", "a", "b"}, "")
+	want := []string{"a", "b", "c"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("candidates = %v, want %v", got, want)
+		}
 	}
 }
 
