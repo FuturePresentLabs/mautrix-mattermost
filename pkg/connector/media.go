@@ -144,10 +144,14 @@ func (c *MattermostClient) convertPost(ctx context.Context, intent bridgev2.Matr
 				firstContent.FormattedBody = rendered.FormattedBody
 				firstContent.Format = rendered.Format
 			}
+			c.attachPermalinkPreviews(ctx, firstContent, post.Message)
 		} else {
 			// Text-only message.
 			textContent := format.RenderMarkdown(msgText, true, false)
 			textContent.MsgType = event.MsgText
+			// Mattermost permalinks carry no preview metadata, so build the card
+			// here. Best effort: the message is sent either way.
+			c.attachPermalinkPreviews(ctx, &textContent, post.Message)
 			cm := &bridgev2.ConvertedMessage{
 				ReplyTo:    replyTo,
 				ThreadRoot: threadRoot,

@@ -74,6 +74,11 @@ type MattermostClient struct {
 	// deletedChannels records portals whose deletion was committed in this
 	// process, so a duplicate hint cannot delete twice.
 	deletedChannels map[string]bool
+
+	// previews caches resolved Mattermost permalink cards. A message must never
+	// fail because a preview could not be built, so failures are cached too.
+	previewMu sync.Mutex
+	previews  map[string]cachedPreview
 }
 
 var _ bridgev2.NetworkAPI = (*MattermostClient)(nil)
