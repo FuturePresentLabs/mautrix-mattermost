@@ -212,17 +212,16 @@ func (c *MattermostClient) Connect(ctx context.Context) {
 
 func (c *MattermostClient) connectLoop() {
 	backoff := 5 * time.Second
+	failures := 0
 	for {
 		cl := mattermost.NewClient(c.serverURL(), c.Token)
 		wsLog := c.lifecycleLogger()
 		cl.Logf = func(format string, args ...any) { wsLog.Debug().Msgf(format, args...) }
 		if err := cl.Connect(); err != nil {
-			c.UserLogin.BridgeState.Send(status.BridgeState{
-				StateEvent: status.StateUnknownError,
-				Error:      "mm-connect-failed",
-				Message:    err.Error(),
-			})
+			failures++
+			c.UserLogin.BridgeState.Send(connectFailedState(failures, err))
 		} else {
+			failures = 0
 			c.mu.Lock()
 			c.client = cl
 			c.mu.Unlock()
@@ -522,16 +521,12 @@ func (c *MattermostClient) processEvents() {
 // close the connector asked for (reconnectWebsocket) reports nothing: the new
 // connection announces "connected" within seconds, and an error state in between
 // only shows up as a flicker. The mark is consumed, so a real drop that follows
-// is reported as usual.
+// is reported as usual, as a transient disconnect (see connection_state.go).
 func (c *MattermostClient) disconnectState() (status.BridgeState, bool) {
 	if c.quietReconnect.Swap(false) {
 		return status.BridgeState{}, false
 	}
-	return status.BridgeState{
-		StateEvent: status.StateUnknownError,
-		Error:      "mm-disconnected",
-		Message:    "WebSocket connection closed",
-	}, true
+	return websocketDisconnectedState(), true
 }
 
 // syncChannels fetches all teams + channels for the user and queues ChatResync events.

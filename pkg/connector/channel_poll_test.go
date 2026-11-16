@@ -237,8 +237,8 @@ func TestDeliberateReconnectIsNotReportedAsDisconnect(t *testing.T) {
 	t.Run("an unplanned close is reported", func(t *testing.T) {
 		c := &MattermostClient{}
 		st, report := c.disconnectState()
-		if !report || st.Error != "mm-disconnected" {
-			t.Fatalf("report=%v state=%+v, want the mm-disconnected error state", report, st)
+		if want := websocketDisconnectedState(); !report || st.StateEvent != want.StateEvent || st.Error != want.Error {
+			t.Fatalf("report=%v state=%+v, want the transient disconnect state %s/%s", report, st, want.StateEvent, want.Error)
 		}
 	})
 	t.Run("a deliberate close is not reported, once", func(t *testing.T) {
