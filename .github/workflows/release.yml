@@ -1,9 +1,10 @@
 name: release
 
-# Builds Linux binaries from a version tag and attaches them, with checksums, to a
-# GitHub release. Tests run first; nothing is published if they fail.
+# Builds Linux and macOS binaries from a version tag and attaches them, with
+# checksums, to a GitHub release. Tests run first (on the native architecture of
+# each runner); nothing is published if any build fails.
 #
-#   git tag v0.1.0-fpl.1 && git push origin v0.1.0-fpl.1
+#   git tag v0.1.0-fpl.2 && git push origin v0.1.0-fpl.2
 
 on:
   push:
@@ -15,11 +16,19 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: true
       matrix:
         include:
-          - { runner: ubuntu-24.04, arch: amd64 }
-          - { runner: ubuntu-24.04-arm, arch: arm64 }
+          - { runner: ubuntu-24.04, os: linux, arch: amd64, native: true }
+          - { runner: ubuntu-24.04-arm, os: linux, arch: arm64, native: true }
+          - { runner: macos-latest, os: darwin, arch: arm64, native: true }
+          # Cross-built with Apple clang on the arm64 runner: the Intel linker is
+          # installed there. Tests and --version run on the arm64 build only.
+          - { runner: macos-latest, os: darwin, arch: amd64, native: false }
     runs-on: ${{ matrix.runner }}
+    env:
+      GOARCH: ${{ matrix.arch }}
+      CGO_ENABLED: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -27,24 +36,29 @@ jobs:
           go-version-file: go.mod
 
       - name: Vet and test
+        if: matrix.native
         run: |
           go vet -tags goolm ./...
           go test -race -tags goolm ./...
 
+      # build.sh takes no flags: extra arguments are passed to `go build` after the
+      # package path, where "-o" is read as a package name. It already writes
+      # ./mautrix-mattermost.
       - name: Build
         run: |
-          ./build.sh -o mautrix-mattermost
-          ./mautrix-mattermost --version
-          archive=mautrix-mattermost-linux-${{ matrix.arch }}.tar.gz
+          ./build.sh
+          file mautrix-mattermost
+          if [ "${{ matrix.native }}" = "true" ]; then ./mautrix-mattermost --version; fi
+          archive=mautrix-mattermost-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
           tar czf "$archive" mautrix-mattermost
-          sha256sum "$archive" > "$archive.sha256"
+          shasum -a 256 "$archive" > "$archive.sha256"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: linux-${{ matrix.arch }}
+          name: ${{ matrix.os }}-${{ matrix.arch }}
           path: |
-            mautrix-mattermost-linux-${{ matrix.arch }}.tar.gz
-            mautrix-mattermost-linux-${{ matrix.arch }}.tar.gz.sha256
+            mautrix-mattermost-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
+            mautrix-mattermost-${{ matrix.os }}-${{ matrix.arch }}.tar.gz.sha256
 
   publish:
     needs: build

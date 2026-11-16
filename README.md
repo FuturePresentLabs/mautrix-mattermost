@@ -18,16 +18,34 @@ Bridges text, media, reactions, edits, deletions, replies, emoji shortcodes, typ
 
 ### Download a release (easiest)
 
-Linux binaries for `amd64` and `arm64` are attached to each [release](https://github.com/FuturePresentLabs/mautrix-mattermost/releases), with a checksum:
+Binaries are attached to each [release](https://github.com/FuturePresentLabs/mautrix-mattermost/releases) with a checksum, for these platforms:
+
+| Platform | File |
+|---|---|
+| Linux x86_64 | `mautrix-mattermost-linux-amd64.tar.gz` |
+| Linux ARM64 | `mautrix-mattermost-linux-arm64.tar.gz` |
+| macOS Apple Silicon | `mautrix-mattermost-darwin-arm64.tar.gz` |
+| macOS Intel | `mautrix-mattermost-darwin-amd64.tar.gz` |
 
 ```sh
-curl -LO https://github.com/FuturePresentLabs/mautrix-mattermost/releases/latest/download/mautrix-mattermost-linux-amd64.tar.gz
-curl -LO https://github.com/FuturePresentLabs/mautrix-mattermost/releases/latest/download/mautrix-mattermost-linux-amd64.tar.gz.sha256
-sha256sum -c mautrix-mattermost-linux-amd64.tar.gz.sha256
-tar xzf mautrix-mattermost-linux-amd64.tar.gz     # produces ./mautrix-mattermost
+# pick the file for your platform
+file=mautrix-mattermost-linux-amd64.tar.gz
+curl -LO "https://github.com/FuturePresentLabs/mautrix-mattermost/releases/latest/download/$file"
+curl -LO "https://github.com/FuturePresentLabs/mautrix-mattermost/releases/latest/download/$file.sha256"
+
+# verify (either form works)
+shasum -a 256 -c "$file.sha256"      # macOS
+sha256sum -c "$file.sha256"          # Linux
+
+tar xzf "$file"                      # produces ./mautrix-mattermost
+./mautrix-mattermost --version
 ```
 
-Use `linux-arm64` on ARM machines.
+On macOS the binary is not notarized, so Gatekeeper may quarantine it. If it refuses to run, clear the quarantine flag once:
+
+```sh
+xattr -d com.apple.quarantine ./mautrix-mattermost
+```
 
 ### Build from source
 
@@ -35,6 +53,14 @@ Use `linux-arm64` on ARM machines.
 git clone https://github.com/FuturePresentLabs/mautrix-mattermost.git
 cd mautrix-mattermost
 ./build.sh          # produces ./mautrix-mattermost
+```
+
+`build.sh` takes no flags: anything after it is passed to `go build` after the package path, where `-o` is read as a package name. The output is always `./mautrix-mattermost`.
+
+Building for a different architecture from a Mac needs the matching SDK or toolchain, for example an Intel binary from an Apple Silicon Mac:
+
+```sh
+GOARCH=amd64 CGO_ENABLED=1 ./build.sh
 ```
 
 ## Setup
