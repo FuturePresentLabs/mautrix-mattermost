@@ -30,7 +30,11 @@ jobs:
       GOARCH: ${{ matrix.arch }}
       CGO_ENABLED: "1"
     steps:
+      # Full history and tags: build.sh stamps the binary with
+      # `git describe --exact-match --tags`, which needs the tag to be present.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -40,6 +44,16 @@ jobs:
         run: |
           go vet -tags goolm ./...
           go test -race -tags goolm ./...
+
+      # build.sh stamps the binary with `git describe --exact-match --tags`. A
+      # checkout of a tag can arrive without the tag ref, which leaves the version
+      # string empty, so make sure one exists here.
+      - name: Ensure version tag
+        run: |
+          if ! git describe --exact-match --tags >/dev/null 2>&1 && [ -n "$GITHUB_REF_NAME" ]; then
+            git tag "$GITHUB_REF_NAME"
+          fi
+          echo "describe: $(git describe --exact-match --tags 2>/dev/null || echo NONE)"
 
       # build.sh takes no flags: extra arguments are passed to `go build` after the
       # package path, where "-o" is read as a package name. It already writes
