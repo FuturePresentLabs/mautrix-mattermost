@@ -52,6 +52,14 @@ func (c *MattermostClient) convertPost(ctx context.Context, intent bridgev2.Matr
 	var parts []*bridgev2.ConvertedMessagePart
 	replyTo, threadRoot := threadRelation(post)
 
+	// Preserve Mattermost's lifecycle system post verbatim as a notice.
+	if post.Type == "system_channel_deleted" || post.Type == "system_channel_restored" {
+		return &bridgev2.ConvertedMessage{Parts: []*bridgev2.ConvertedMessagePart{{
+			Type:    event.EventMessage,
+			Content: &event.MessageEventContent{MsgType: event.MsgNotice, Body: post.Message},
+		}}}, nil
+	}
+
 	// Convert file attachments.
 	files := resolveFiles(post)
 	for _, fi := range files {
