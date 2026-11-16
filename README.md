@@ -108,6 +108,34 @@ Send `login` to the bridge bot. Two methods are available:
 - **Personal Access Token** — server URL + PAT (recommended; generate one in Mattermost under *Profile → Security → Personal Access Tokens*)
 - **Email & password** — server URL + email + password (may be blocked by Cloudflare or disabled by the server admin)
 
+## Presence (optional)
+
+Mattermost reports status over the same websocket that carries messages. Set
+`network.presence.enabled: true` to republish those statuses as **Matrix presence**
+on the ghost of the user they belong to:
+
+| Mattermost | Matrix                                   |
+| ---------- | ---------------------------------------- |
+| `online`   | `online`                                 |
+| `away`     | `unavailable`                            |
+| `dnd`      | `online`, status message "Do Not Disturb" |
+| `offline`  | `offline`                                |
+
+Off by default: every status change costs one homeserver request, and a homeserver
+that does not store presence gains nothing but the traffic.
+
+What it covers, and what it deliberately leaves alone:
+
+- Only users the bridge has already bridged. A status change for someone with no ghost
+  (they never posted in a bridged channel) is skipped, not turned into a new ghost.
+- The logged-in user's own status. Their MXID is a real Matrix account, and presence is
+  set by their own clients; the bridge must not fight them.
+- Presence is only pushed on change, so a bridge started after someone went online
+  learns nothing about them until their next change.
+- The homeserver has to support presence. Synapse stores it and shares it with users in
+  the same rooms. Beeper's hungryserv serves a narrow Matrix subset and drops it, so a
+  Beeper-hosted bridge shows no presence and logs no error.
+
 ## About this fork
 
 This fork tracks upstream and carries the changes below. They are also open as upstream pull requests, so some or all of them may eventually be merged there.
@@ -117,6 +145,9 @@ This fork tracks upstream and carries the changes below. They are also open as u
 | Native Matrix threading for Mattermost threads | [#8](https://github.com/bostrot/mautrix-mattermost/pull/8) |
 | Channel lifecycle: an archived channel keeps its room, shows Mattermost's own archive/restore message and becomes read-only; a permanently deleted channel removes its room, including one deleted while the bridge was offline | [#9](https://github.com/bostrot/mautrix-mattermost/pull/9) |
 | Reactions are backfilled with the messages they belong to | [#10](https://github.com/bostrot/mautrix-mattermost/pull/10) |
+
+Optional presence publishing (see [Presence](#presence-optional)) is fork-only and has
+no upstream PR yet.
 
 How the lifecycle behaves, and what to watch for:
 

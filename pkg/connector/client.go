@@ -35,6 +35,9 @@ type MattermostClient struct {
 	mu       sync.RWMutex
 	channels map[string]*mattermost.Channel // keyed by channel ID
 	users    map[string]*mattermost.User    // keyed by user ID
+	// presenceUpdates feeds the presence worker (see presence.go). Guarded by mu
+	// because Connect installs it and the websocket loop may already be running.
+	presenceUpdates chan presenceUpdate
 	done     chan struct{}                  // closed by Disconnect to stop reconnect loop
 
 	// probeChannelFn overrides the channel lifecycle probe in tests. When nil,
@@ -194,6 +197,7 @@ func (c *MattermostClient) Connect(ctx context.Context) {
 		}
 	}
 	c.done = make(chan struct{})
+	c.startPresencePublisher(c.done)
 	go c.connectLoop()
 	go c.lifecyclePollLoop()
 }
@@ -400,6 +404,11 @@ func (c *MattermostClient) processEvents() {
 				},
 				ReadUpTo: time.Now(),
 			})
+
+		case *mattermost.StatusChangeEvent:
+			// Mattermost reports workspace presence over the same socket; it is
+			// forwarded only when presence is enabled (presence.go).
+			c.handleStatusChange(evt)
 
 		case *mattermost.ChannelCreatedEvent:
 			if evt.Channel == nil {

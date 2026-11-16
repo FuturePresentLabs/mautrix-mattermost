@@ -1,3 +1,7 @@
 network:
-    # No extra Mattermost-specific config is required here.
-    # Server URL and credentials are provided via the bridge login flow.
+    # Mattermost server URL and credentials are provided via the bridge login flow.
+    presence:
+        # Republish Mattermost user statuses (online / away / dnd / offline) as Matrix
+        # presence for each bridged ghost. Off by default: it costs one homeserver
+        # request per status change, and homeservers that drop presence gain nothing.
+        enabled: false

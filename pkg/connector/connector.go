@@ -475,9 +475,17 @@ func webviewCookieStep(rawURL string) (*bridgev2.LoginStep, string, error) {
 	}, serverURL, nil
 }
 
-// Config holds any future bridge-specific configuration.
-type Config struct{}
+// Config holds the bridge-specific configuration.
+type Config struct {
+	Presence PresenceConfig `yaml:"presence"`
+}
 
 const ExampleConfig = `# Mattermost Bridge Configuration
-# Additional per-network settings can be added here.
+
+network:
+    presence:
+        # Republish Mattermost user statuses (online / away / dnd / offline) as Matrix
+        # presence for each bridged ghost. Off by default: it costs one homeserver
+        # request per status change, and homeservers that drop presence gain nothing.
+        enabled: false
 `
