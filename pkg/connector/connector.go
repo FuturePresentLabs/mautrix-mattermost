@@ -56,11 +56,20 @@ func (m *MattermostConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabili
 	return &bridgev2.NetworkGeneralCapabilities{}
 }
 
+// GetConfig returns the network section of the config. upgradeConfig has to copy every
+// field explicitly: the framework rebuilds the file from the example, so anything the
+// upgrader does not copy is silently replaced by the example's default while the file
+// still shows the user's value.
 func (m *MattermostConnector) GetConfig() (string, any, configupgrade.Upgrader) {
 	if m.Config == nil {
 		m.Config = &Config{}
 	}
-	return ExampleConfig, m.Config, configupgrade.SimpleUpgrader(func(configupgrade.Helper) {})
+	return ExampleConfig, m.Config, configupgrade.SimpleUpgrader(upgradeConfig)
+}
+
+// upgradeConfig carries the user's network options over the example config.
+func upgradeConfig(helper configupgrade.Helper) {
+	helper.Copy(configupgrade.Bool, "presence", "enabled")
 }
 
 func (m *MattermostConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {

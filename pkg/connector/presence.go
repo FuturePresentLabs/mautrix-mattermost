@@ -111,8 +111,20 @@ func publishPresence(ctx context.Context, set presenceSetter, resolve ghostResol
 // requests finding out.
 func (c *MattermostClient) startPresencePoller(done <-chan struct{}) {
 	if _, ok := c.presenceSetter(); !ok {
+		lg := c.lifecycleLogger()
+		conn, isConnector := c.UserLogin.Bridge.Network.(*MattermostConnector)
+		mx, isMatrixConnector := c.UserLogin.Bridge.Matrix.(*matrix.Connector)
+		lg.Debug().
+			Bool("network_is_connector", isConnector).
+			Bool("config_present", isConnector && conn.Config != nil).
+			Bool("enabled", isConnector && conn.Config != nil && conn.Config.Presence.Enabled).
+			Bool("matrix_is_connector", isMatrixConnector).
+			Bool("appservice_present", isMatrixConnector && mx.AS != nil).
+			Msg("Presence publishing is off")
 		return
 	}
+	lg := c.lifecycleLogger()
+	lg.Debug().Dur("interval", presencePollInterval).Msg("Starting presence poller")
 	wake := make(chan struct{}, 1)
 	c.mu.Lock()
 	c.presenceWake = wake
@@ -152,6 +164,8 @@ func (c *MattermostClient) pollPresence() {
 	}
 	ids := c.presenceCandidates()
 	if len(ids) == 0 {
+		lg := c.lifecycleLogger()
+		lg.Debug().Msg("Presence poll found no mattermost users to ask about")
 		return
 	}
 	statuses := make(map[string]string, len(ids))
@@ -174,6 +188,11 @@ func (c *MattermostClient) pollPresence() {
 	for _, update := range presenceDiff(previous, statuses) {
 		c.publishPresence(update)
 	}
+	lg := c.lifecycleLogger()
+	lg.Debug().
+		Int("candidates", len(ids)).
+		Int("changes", len(presenceDiff(previous, statuses))).
+		Msg("Polled Mattermost statuses")
 }
 
 // presenceCandidates lists the Mattermost users worth asking about: everyone whose

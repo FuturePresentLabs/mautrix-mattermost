@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"go.mau.fi/util/configupgrade"
 	"gopkg.in/yaml.v3"
 
 	"maunium.net/go/mautrix"
@@ -268,4 +271,41 @@ func mustReadExampleConfig(t *testing.T) string {
 		t.Fatalf("read example-config.yaml: %v", err)
 	}
 	return string(body)
+}
+
+// TestPresenceSurvivesConfigUpgrade reproduces the bridge framework's config path: the
+// file goes through the upgrader that mxmain builds (full example + network proxy), then
+// the network node is decoded into Config. A flag that cannot round-trip is a flag the
+// bridge silently ignores at startup.
+func TestPresenceSurvivesConfigUpgrade(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("network:\n    presence:\n        enabled: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	example, _, networkUpgrader := (&MattermostConnector{}).GetConfig()
+	var base strings.Builder
+	base.WriteString("network:\n")
+	for _, line := range strings.Split(example, "\n") {
+		base.WriteString("    " + line + "\n")
+	}
+	upgrader := configupgrade.MergeUpgraders(base.String(),
+		&configupgrade.ProxyUpgrader{Target: networkUpgrader, Prefix: []string{"network"}})
+	data, _, err := configupgrade.Do(path, false, upgrader)
+	if err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	var full struct {
+		Network yaml.Node `yaml:"network"`
+	}
+	if err := yaml.Unmarshal(data, &full); err != nil {
+		t.Fatalf("parse upgraded config: %v", err)
+	}
+	var cfg Config
+	if err := full.Network.Decode(&cfg); err != nil {
+		t.Fatalf("decode network: %v", err)
+	}
+	if !cfg.Presence.Enabled {
+		t.Fatalf("presence lost in upgrade; upgraded yaml:\n%s", data)
+	}
 }
