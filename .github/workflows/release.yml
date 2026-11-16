@@ -7,9 +7,9 @@ name: release
 # Real release:
 #   git tag v0.2.0 && git push origin v0.2.0
 #
-# Rehearsal (builds all four, publishes nothing): run this workflow by hand from
-# the Actions tab, or `gh workflow run release.yml`. Use it to check the artifacts
-# and the version string before creating a tag.
+# Rehearsal (builds everything, publishes nothing): run this workflow by hand
+# from the Actions tab, or `gh workflow run release.yml`. Use it to check the
+# artifacts and the version string before creating a tag.
 
 on:
   push:
@@ -24,16 +24,21 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
+        # `archs` lists every binary one runner builds; the first is the
+        # runner's own architecture, where the tests and --version check run.
+        #
+        # Both macOS binaries come from one job. GitHub's hosted macOS arm64
+        # pool is often short of capacity ("job was not acquired by Runner ...
+        # even after multiple attempts"), and every macOS job is another chance
+        # for a release to stall; one job halves that exposure. The Intel
+        # binary is cross-built with Apple clang on the arm64 runner, which
+        # has the Intel toolchain installed.
         include:
-          - { runner: ubuntu-24.04, os: linux, arch: amd64, native: true }
-          - { runner: ubuntu-24.04-arm, os: linux, arch: arm64, native: true }
-          - { runner: macos-latest, os: darwin, arch: arm64, native: true }
-          # Cross-built with Apple clang on the arm64 runner: the Intel linker is
-          # installed there. Tests and --version run on the arm64 build only.
-          - { runner: macos-latest, os: darwin, arch: amd64, native: false }
+          - { runner: ubuntu-24.04, os: linux, archs: "amd64" }
+          - { runner: ubuntu-24.04-arm, os: linux, archs: "arm64" }
+          - { runner: macos-latest, os: darwin, archs: "arm64 amd64" }
     runs-on: ${{ matrix.runner }}
     env:
-      GOARCH: ${{ matrix.arch }}
       CGO_ENABLED: "1"
     steps:
       # Full history and tags: build.sh stamps the binary with
@@ -45,8 +50,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Vet and test
-        if: matrix.native
+      - name: Vet and test (native architecture)
         run: |
           go vet -tags goolm ./...
           go test -race -tags goolm ./...
@@ -62,23 +66,27 @@ jobs:
           echo "describe: $(git describe --exact-match --tags 2>/dev/null || echo NONE)"
 
       # build.sh takes no flags: extra arguments are passed to `go build` after the
-      # package path, where "-o" is read as a package name. It already writes
-      # ./mautrix-mattermost.
+      # package path, where "-o" is read as a package name. It writes
+      # ./mautrix-mattermost, so each architecture is archived before the next.
       - name: Build
         run: |
-          ./build.sh
-          file mautrix-mattermost
-          if [ "${{ matrix.native }}" = "true" ]; then ./mautrix-mattermost --version; fi
-          archive=mautrix-mattermost-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
-          tar czf "$archive" mautrix-mattermost
-          shasum -a 256 "$archive" > "$archive.sha256"
+          native=$(go env GOHOSTARCH)
+          for arch in ${{ matrix.archs }}; do
+            GOARCH=$arch ./build.sh
+            file mautrix-mattermost
+            if [ "$arch" = "$native" ]; then ./mautrix-mattermost --version; fi
+            archive=mautrix-mattermost-${{ matrix.os }}-$arch.tar.gz
+            tar czf "$archive" mautrix-mattermost
+            shasum -a 256 "$archive" > "$archive.sha256"
+            rm mautrix-mattermost
+          done
+          ls -l mautrix-mattermost-*
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.os }}-${{ matrix.arch }}
-          path: |
-            mautrix-mattermost-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
-            mautrix-mattermost-${{ matrix.os }}-${{ matrix.arch }}.tar.gz.sha256
+          name: ${{ matrix.os }}-${{ matrix.runner }}
+          path: mautrix-mattermost-${{ matrix.os }}-*.tar.gz*
+          if-no-files-found: error
 
   # Only a tag push publishes; a manual run stops after the build so a rehearsal
   # can never become a release.
@@ -94,12 +102,21 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Create release
+      # Idempotent: a release that already exists for this tag (a re-run, or one
+      # published by hand while CI was stalled) gets its files replaced and keeps
+      # its notes; otherwise the release is created.
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -l dist
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes
+          set -- dist/*.tar.gz
+          test "$#" -eq 4
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi
