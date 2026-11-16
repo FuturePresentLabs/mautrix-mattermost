@@ -101,3 +101,40 @@ journalctl --user -u mautrix-mattermost -f
 see [Presence](../README.md#presence-optional). It is off by default and only reaches
 clients when the homeserver stores presence; Beeper's hungryserv does not, so on a
 Beeper-hosted bridge the flag costs requests and changes nothing.
+
+## What was actually run
+
+The staging homeserver on `agora-one` is a loopback Synapse in Docker. It exists to
+prove the bridge end to end, not to serve anybody:
+
+```sh
+mkdir -p ~/synapse-staging
+docker run --rm -v ~/synapse-staging:/data \
+  -e SYNAPSE_SERVER_NAME=agora.local -e SYNAPSE_REPORT_STATS=no \
+  matrixdotorg/synapse:latest generate
+docker run -d --name synapse-staging --network host \
+  -v ~/synapse-staging:/data matrixdotorg/synapse:latest
+# register a normal account, then log in through /_matrix/client/v3/login
+docker exec synapse-staging register_new_matrix_user \
+  -c /data/homeserver.yaml -u <user> -p <password> --no-admin http://localhost:8008
+```
+
+`--network host` matters: the homeserver has to reach the bridge at
+`127.0.0.1:29345`, and the appservice registration carries that URL.
+
+Then, with the bridge running, log into Mattermost through the bridge bot itself:
+
+1. Create a DM with `@mattermostbot:<domain>`; the bot welcomes you and marks the room
+   as your management room.
+2. `login` lists the flows, `login mm-login-pat` starts one.
+3. Answer the two prompts: server URL (`https://mm.fpl.dev`), then the personal access
+   token.
+4. `Successfully logged in as <user>`; every team, channel and DM becomes a room.
+
+Presence was checked against the same homeserver with `GET
+/_matrix/client/v3/presence/@mattermost_<id>:agora.local/status`: setting the
+Mattermost user to `dnd` produced `online` + status message "Do Not Disturb", `away`
+produced `unavailable`, and `offline` produced `offline`, each within one poll.
+
+To remove the staging homeserver: `docker rm -f synapse-staging && rm -rf
+~/synapse-staging`.
