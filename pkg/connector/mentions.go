@@ -4,9 +4,12 @@ import (
 	"context"
 	"html"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -372,49 +375,164 @@ func (c *MattermostClient) outboundMarkdown(ctx context.Context, content *event.
 		}
 		body = parser.Parse(content.FormattedBody, format.NewContext(ctx))
 	}
+	body = c.replacePlainMentions(ctx, body, content.Mentions)
 	if content.Mentions != nil && content.Mentions.Room {
 		body = roomMentionWord.ReplaceAllString(body, "${1}@channel")
 	}
 	return body
 }
 
+// mmUserIDForMXID returns the Mattermost user ID behind a Matrix user: the
+// logged-in user's own ID for their Matrix account, the ghost's ID for a
+// ghost, and "" for anyone else.
+func (c *MattermostClient) mmUserIDForMXID(mxid id.UserID) string {
+	if c.UserLogin != nil && c.UserLogin.UserLogin != nil && mxid == c.UserLogin.UserMXID {
+		return c.UserID
+	}
+	if c.parseGhostFn != nil {
+		return c.parseGhostFn(mxid)
+	}
+	if c.UserLogin != nil && c.UserLogin.Bridge != nil && c.UserLogin.Bridge.Matrix != nil {
+		if uid, ok := c.UserLogin.Bridge.Matrix.ParseGhostMXID(mxid); ok {
+			return string(uid)
+		}
+	}
+	return ""
+}
+
+// mmUser returns the Mattermost profile for a user ID, from the cache or over
+// REST. It returns nil if the user cannot be fetched.
+func (c *MattermostClient) mmUser(ctx context.Context, mmID string) *mattermost.User {
+	c.mu.RLock()
+	u := c.users[mmID]
+	c.mu.RUnlock()
+	if u != nil {
+		return u
+	}
+	fetched, err := mattermost.GetUser(c.serverURL(), c.Token, mmID)
+	if err != nil {
+		zerolog.Ctx(ctx).Warn().Err(err).Str("user_id", mmID).Msg("Failed to look up mentioned user")
+		return nil
+	}
+	c.mu.Lock()
+	if c.users == nil {
+		c.users = make(map[string]*mattermost.User)
+	}
+	c.users[mmID] = fetched
+	c.mu.Unlock()
+	return fetched
+}
+
 // usernameForMXID returns the Mattermost username a Matrix user maps to: the
 // logged-in user's own username, or the username behind a ghost. It returns ""
 // for anyone else.
 func (c *MattermostClient) usernameForMXID(ctx context.Context, mxid id.UserID) string {
-	if c.UserLogin != nil && c.UserLogin.UserLogin != nil && mxid == c.UserLogin.UserMXID {
-		return c.Username
-	}
-	var mmID string
-	if c.parseGhostFn != nil {
-		mmID = c.parseGhostFn(mxid)
-	} else if c.UserLogin != nil && c.UserLogin.Bridge != nil && c.UserLogin.Bridge.Matrix != nil {
-		if uid, ok := c.UserLogin.Bridge.Matrix.ParseGhostMXID(mxid); ok {
-			mmID = string(uid)
-		}
-	}
+	mmID := c.mmUserIDForMXID(mxid)
 	if mmID == "" {
 		return ""
 	}
-	if mmID == c.UserID {
+	if mmID == c.UserID && c.Username != "" {
 		return c.Username
 	}
-	c.mu.RLock()
-	u := c.users[mmID]
-	c.mu.RUnlock()
-	if u == nil {
-		fetched, err := mattermost.GetUser(c.serverURL(), c.Token, mmID)
-		if err != nil {
-			zerolog.Ctx(ctx).Warn().Err(err).Str("user_id", mmID).Msg("Failed to look up mentioned user")
-			return ""
-		}
-		c.mu.Lock()
-		if c.users == nil {
-			c.users = make(map[string]*mattermost.User)
-		}
-		c.users[mmID] = fetched
-		c.mu.Unlock()
-		u = fetched
+	if u := c.mmUser(ctx, mmID); u != nil {
+		return u.Username
 	}
-	return u.Username
+	return ""
+}
+
+// mentionNames lists the names a Matrix client may have written after "@" for
+// a Mattermost user: the name the user's ghost has in Matrix (what Beeper's
+// autocomplete inserts) and their current Mattermost display name.
+func (c *MattermostClient) mentionNames(ctx context.Context, mmID string) []string {
+	var names []string
+	add := func(n string) {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			return
+		}
+		for _, x := range names {
+			if strings.EqualFold(x, n) {
+				return
+			}
+		}
+		names = append(names, n)
+	}
+	if c.ghostNameFn != nil {
+		add(c.ghostNameFn(mmID))
+	} else if c.UserLogin != nil && c.UserLogin.Bridge != nil && c.UserLogin.Bridge.DB != nil {
+		if ghost, err := c.UserLogin.Bridge.GetExistingGhostByID(ctx, networkid.UserID(mmID)); err == nil && ghost != nil {
+			add(ghost.Name)
+		}
+	}
+	if u := c.mmUser(ctx, mmID); u != nil {
+		add(u.DisplayName())
+	}
+	// Longest first, so "@James Merrill" is replaced before a shorter name
+	// could match its prefix.
+	sort.Slice(names, func(i, j int) bool { return len(names[i]) > len(names[j]) })
+	return names
+}
+
+// replaceNameMention replaces each "@name" in body (case-insensitive) with
+// "@username", in a single pass over the original text, so a replacement is
+// never matched again. A match counts only at a word boundary: the "@" must
+// not follow a letter, digit, "_" or "@" (an email address), and the name must
+// not continue into a letter, digit or "_" ("@Alice Examples" is not "@Alice
+// Example").
+func replaceNameMention(body, name, username string) string {
+	pattern := regexp.MustCompile(`(?i)@` + regexp.QuoteMeta(name))
+	var out strings.Builder
+	last := 0
+	for _, m := range pattern.FindAllStringIndex(body, -1) {
+		if m[0] > 0 {
+			if r, _ := utf8.DecodeLastRuneInString(body[:m[0]]); isMentionWordRune(r) || r == '@' {
+				continue
+			}
+		}
+		if m[1] < len(body) {
+			if r, _ := utf8.DecodeRuneInString(body[m[1]:]); isMentionWordRune(r) {
+				continue
+			}
+		}
+		out.WriteString(body[last:m[0]])
+		out.WriteString("@" + username)
+		last = m[1]
+	}
+	if last == 0 {
+		return body
+	}
+	out.WriteString(body[last:])
+	return out.String()
+}
+
+func isMentionWordRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
+}
+
+// replacePlainMentions handles clients that send a mention as plain text
+// ("@James Merrill") plus m.mentions instead of an HTML pill, as Beeper does:
+// for each mentioned user, "@<name>" becomes "@username". Only users listed in
+// m.mentions are touched, so ordinary text that happens to contain "@Name" is
+// left alone.
+func (c *MattermostClient) replacePlainMentions(ctx context.Context, body string, mentions *event.Mentions) string {
+	if mentions == nil {
+		return body
+	}
+	for _, mxid := range mentions.UserIDs {
+		mmID := c.mmUserIDForMXID(mxid)
+		if mmID == "" {
+			continue
+		}
+		username := c.usernameForMXID(ctx, mxid)
+		if username == "" {
+			continue
+		}
+		for _, name := range c.mentionNames(ctx, mmID) {
+			if strings.EqualFold(name, username) {
+				continue // already "@username"
+			}
+			body = replaceNameMention(body, name, username)
+		}
+	}
+	return body
 }
