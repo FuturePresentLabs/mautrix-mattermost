@@ -71,7 +71,7 @@ func TestMatrixPresence(t *testing.T) {
 // Mattermost user ID — is what reaches the homeserver.
 func TestPublishPresenceSendsGhostMXID(t *testing.T) {
 	setter := &recordSetter{}
-	mxid := id.UserID("@mm_abc:beeper.local")
+	mxid := id.UserID("@mm_abc:example.org")
 	resolve := func(context.Context, string) (id.UserID, bool, error) { return mxid, true, nil }
 
 	err := publishPresence(context.Background(), setter.set, resolve, presenceUpdate{userID: "abc", status: "away"})
@@ -110,7 +110,7 @@ func TestPublishPresenceSkipsUnmappedStatus(t *testing.T) {
 	resolved := false
 	resolve := func(context.Context, string) (id.UserID, bool, error) {
 		resolved = true
-		return "@mm_abc:beeper.local", true, nil
+		return "@mm_abc:example.org", true, nil
 	}
 
 	if err := publishPresence(context.Background(), setter.set, resolve, presenceUpdate{userID: "abc", status: ""}); err != nil {
@@ -130,7 +130,7 @@ func TestPublishPresenceReportsErrors(t *testing.T) {
 	boom := errors.New("homeserver said no")
 	t.Run("set fails", func(t *testing.T) {
 		setter := &recordSetter{err: boom}
-		resolve := func(context.Context, string) (id.UserID, bool, error) { return "@mm_abc:beeper.local", true, nil }
+		resolve := func(context.Context, string) (id.UserID, bool, error) { return "@mm_abc:example.org", true, nil }
 		if err := publishPresence(context.Background(), setter.set, resolve, presenceUpdate{userID: "abc", status: "online"}); !errors.Is(err, boom) {
 			t.Fatalf("error = %v, want %v", err, boom)
 		}

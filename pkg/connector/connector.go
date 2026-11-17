@@ -30,6 +30,11 @@ func (m *MattermostConnector) Init(bridge *bridgev2.Bridge) {
 }
 
 func (m *MattermostConnector) Start(ctx context.Context) error {
+	if m.Config != nil {
+		if _, err := parseDisplayNames(m.Config.DisplayNames); err != nil {
+			return fmt.Errorf("network.display_names: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -70,6 +75,7 @@ func (m *MattermostConnector) GetConfig() (string, any, configupgrade.Upgrader) 
 // upgradeConfig carries the user's network options over the example config.
 func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Bool, "presence", "enabled")
+	helper.Copy(configupgrade.Str, "display_names")
 }
 
 func (m *MattermostConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
@@ -487,6 +493,9 @@ func webviewCookieStep(rawURL string) (*bridgev2.LoginStep, string, error) {
 // Config holds the bridge-specific configuration.
 type Config struct {
 	Presence PresenceConfig `yaml:"presence"`
+	// DisplayNames picks how Mattermost users are named in Matrix (see
+	// displaynames.go). Empty means "server".
+	DisplayNames string `yaml:"display_names"`
 }
 
 const ExampleConfig = `# Mattermost Bridge Configuration
@@ -496,4 +505,14 @@ const ExampleConfig = `# Mattermost Bridge Configuration
 # per status change, and homeservers that drop presence gain nothing from it.
 presence:
     enabled: false
+
+# How Mattermost people are named in Matrix: their names and the text of
+# @mention pills. Mentions are always sent and matched by username.
+#   server    - as Mattermost shows them to you: your own display preference,
+#               else the server's "Teammate Name Display" setting
+#   username  - username (alice)
+#   full_name - First Last, falling back to username
+#   nickname  - nickname, then First Last, then username
+# Changes apply to existing names at the next bridge restart.
+display_names: server
 `

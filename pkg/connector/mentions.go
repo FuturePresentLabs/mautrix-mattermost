@@ -86,7 +86,7 @@ type mentionSpan struct {
 }
 
 // findMentionSpans returns the candidate mentions in text. Trailing sentence
-// punctuation is not part of the name ("@avery." mentions avery); a name that
+// punctuation is not part of the name ("@alice." mentions alice); a name that
 // still ends in "." or "-" after the lookup fails is retried shorter by the
 // caller via candidateNames.
 func findMentionSpans(text string) []mentionSpan {
@@ -101,8 +101,8 @@ func findMentionSpans(text string) []mentionSpan {
 }
 
 // candidateNames lists the names a written mention may refer to, longest
-// first: "@avery." may be the user "avery." (not allowed in Mattermost, but
-// harmless to try) or "avery".
+// first: "@alice." may be the user "alice." (not allowed in Mattermost, but
+// harmless to try) or "erin".
 func candidateNames(name string) []string {
 	out := []string{strings.ToLower(name)}
 	trimmed := strings.TrimRight(name, ".-_")
@@ -272,7 +272,7 @@ func (c *MattermostClient) applyInboundMentions(ctx context.Context, content *ev
 			end := sp.start + 1 + len(used) // "@" + the matched name; the rest stays text
 			out.WriteString(html.EscapeString(text[last:sp.start]))
 			out.WriteString(`<a href="` + html.EscapeString(mxid.URI().MatrixToURL()) + `">`)
-			out.WriteString(html.EscapeString(u.DisplayName()))
+			out.WriteString(html.EscapeString(c.displayName(u)))
 			out.WriteString(`</a>`)
 			last = end
 			if !containsUserID(userIDs, mxid) {
@@ -442,7 +442,8 @@ func (c *MattermostClient) usernameForMXID(ctx context.Context, mxid id.UserID) 
 
 // mentionNames lists the names a Matrix client may have written after "@" for
 // a Mattermost user: the name the user's ghost has in Matrix (what Beeper's
-// autocomplete inserts) and their current Mattermost display name.
+// autocomplete inserts), their name under the active format, their full name
+// and their nickname.
 func (c *MattermostClient) mentionNames(ctx context.Context, mmID string) []string {
 	var names []string
 	add := func(n string) {
@@ -465,9 +466,13 @@ func (c *MattermostClient) mentionNames(ctx context.Context, mmID string) []stri
 		}
 	}
 	if u := c.mmUser(ctx, mmID); u != nil {
-		add(u.DisplayName())
+		// Every form the name may have had, so a ghost still carrying a name
+		// from another display_names setting is matched too.
+		add(c.displayName(u))
+		add(u.FullName())
+		add(u.Nickname)
 	}
-	// Longest first, so "@James Merrill" is replaced before a shorter name
+	// Longest first, so "@Frank Example" is replaced before a shorter name
 	// could match its prefix.
 	sort.Slice(names, func(i, j int) bool { return len(names[i]) > len(names[j]) })
 	return names
@@ -510,7 +515,7 @@ func isMentionWordRune(r rune) bool {
 }
 
 // replacePlainMentions handles clients that send a mention as plain text
-// ("@James Merrill") plus m.mentions instead of an HTML pill, as Beeper does:
+// ("@Frank Example") plus m.mentions instead of an HTML pill, as Beeper does:
 // for each mentioned user, "@<name>" becomes "@username". Only users listed in
 // m.mentions are touched, so ordinary text that happens to contain "@Name" is
 // left alone.

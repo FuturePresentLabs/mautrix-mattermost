@@ -96,11 +96,12 @@ func ghostMXID(mmID string) id.UserID { return id.UserID("@mm_" + mmID + ghostHo
 
 func newMentionClient(srv *mentionServer) *MattermostClient {
 	return &MattermostClient{
-		Token:     "tok",
-		baseURL:   srv.URL,
-		UserID:    "uself",
-		Username:  "carol",
-		UserLogin: &bridgev2.UserLogin{UserLogin: &database.UserLogin{UserMXID: selfMXID}},
+		nameFormat: mattermost.NameFormatNicknameFullName,
+		Token:      "tok",
+		baseURL:    srv.URL,
+		UserID:     "uself",
+		Username:   "carol",
+		UserLogin:  &bridgev2.UserLogin{UserLogin: &database.UserLogin{UserMXID: selfMXID}},
 		ghostMXIDFn: func(mmID string) id.UserID {
 			return ghostMXID(mmID)
 		},
@@ -381,4 +382,8 @@ func TestOutboundPlainTextMentions(t *testing.T) {
 			}
 		})
 	}
+}
+
+func plainMention(body string, users ...id.UserID) event.MessageEventContent {
+	return event.MessageEventContent{MsgType: event.MsgText, Body: body, Mentions: &event.Mentions{UserIDs: users}}
 }

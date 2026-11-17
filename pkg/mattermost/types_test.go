@@ -140,3 +140,31 @@ func TestUserDisplayName(t *testing.T) {
 		}
 	}
 }
+
+func TestUserNameFor(t *testing.T) {
+	sso := User{Username: "dee", FirstName: "Dee"}
+	full := User{Username: "alice", FirstName: "Alice", LastName: "Example"}
+	nick := User{Username: "bob", FirstName: "Robert", Nickname: "Bobby"}
+	bare := User{Username: "erin"}
+	cases := []struct {
+		u            User
+		format, want string
+	}{
+		{sso, NameFormatUsername, "dee"},
+		{sso, NameFormatFullName, "Dee"},
+		{sso, NameFormatNicknameFullName, "Dee"},
+		{full, NameFormatUsername, "alice"},
+		{full, NameFormatFullName, "Alice Example"},
+		{full, NameFormatNicknameFullName, "Alice Example"},
+		{nick, NameFormatFullName, "Robert"},
+		{nick, NameFormatNicknameFullName, "Bobby"},
+		{bare, NameFormatFullName, "erin"},
+		{bare, NameFormatNicknameFullName, "erin"},
+		{full, "something_new", "alice"},
+	}
+	for _, tc := range cases {
+		if got := tc.u.NameFor(tc.format); got != tc.want {
+			t.Errorf("%s.NameFor(%q) = %q, want %q", tc.u.Username, tc.format, got, tc.want)
+		}
+	}
+}

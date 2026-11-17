@@ -92,7 +92,7 @@ func previewServer(t *testing.T, requests *int) *httptest.Server {
 				Message: "The backup worked.\n\nLinks to MM messages are pretty slick.",
 			})
 		case r.URL.Path == "/api/v4/users/u1":
-			_ = json.NewEncoder(w).Encode(mattermost.User{ID: "u1", FirstName: "Avery", LastName: "Wagar"})
+			_ = json.NewEncoder(w).Encode(mattermost.User{ID: "u1", FirstName: "Erin", LastName: "Example"})
 		case r.URL.Path == "/api/v4/channels/c1":
 			_ = json.NewEncoder(w).Encode(mattermost.Channel{ID: "c1", Name: "town-square", DisplayName: "Town Square"})
 		default:
@@ -106,13 +106,13 @@ func TestResolvePermalinkBuildsQuote(t *testing.T) {
 	var requests int
 	srv := previewServer(t, &requests)
 	defer srv.Close()
-	c := &MattermostClient{Token: "tok", baseURL: srv.URL}
+	c := &MattermostClient{nameFormat: mattermost.NameFormatNicknameFullName, Token: "tok", baseURL: srv.URL}
 
 	q := c.resolvePermalink(testPostID)
 	if q == nil {
 		t.Fatal("nothing resolved")
 	}
-	if q.Title != "Avery Wagar in Town Square" {
+	if q.Title != "Erin Example in Town Square" {
 		t.Errorf("title = %q, want the author and channel", q.Title)
 	}
 	if q.Text != "The backup worked.\n\nLinks to MM messages are pretty slick." {
@@ -132,7 +132,7 @@ func TestResolvePermalinkFailsQuietly(t *testing.T) {
 	var requests int
 	srv := previewServer(t, &requests)
 	defer srv.Close()
-	c := &MattermostClient{Token: "tok", baseURL: srv.URL}
+	c := &MattermostClient{nameFormat: mattermost.NameFormatNicknameFullName, Token: "tok", baseURL: srv.URL}
 
 	if q := c.resolvePermalink("zzzzzzzzzzzzzzzzzzzzzzzzzz"); q != nil {
 		t.Errorf("resolved a missing post: %+v", q)
@@ -149,7 +149,7 @@ func TestResolvePermalinkFailsQuietly(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":"app.post.get.app_error","status_code":403}`))
 	}))
 	defer forbidden.Close()
-	c2 := &MattermostClient{Token: "tok", baseURL: forbidden.URL}
+	c2 := &MattermostClient{nameFormat: mattermost.NameFormatNicknameFullName, Token: "tok", baseURL: forbidden.URL}
 	if q := c2.resolvePermalink(testPostID); q != nil {
 		t.Errorf("resolved a forbidden post: %+v", q)
 	}
@@ -159,7 +159,7 @@ func TestResolvePermalinkFailsQuietly(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(mattermost.Post{ID: testPostID, UserID: "u1", DeleteAt: 12345, Message: "gone"})
 	}))
 	defer deleted.Close()
-	c3 := &MattermostClient{Token: "tok", baseURL: deleted.URL}
+	c3 := &MattermostClient{nameFormat: mattermost.NameFormatNicknameFullName, Token: "tok", baseURL: deleted.URL}
 	if q := c3.resolvePermalink(testPostID); q != nil {
 		t.Errorf("resolved a deleted post: %+v", q)
 	}
@@ -173,7 +173,7 @@ func TestAttachPermalinkQuotes(t *testing.T) {
 	var requests int
 	srv := previewServer(t, &requests)
 	defer srv.Close()
-	c := &MattermostClient{Token: "tok", baseURL: srv.URL}
+	c := &MattermostClient{nameFormat: mattermost.NameFormatNicknameFullName, Token: "tok", baseURL: srv.URL}
 
 	url := srv.URL + "/fpl/pl/" + testPostID
 	content := &event.MessageEventContent{MsgType: event.MsgText, Body: "look: " + url}
@@ -182,7 +182,7 @@ func TestAttachPermalinkQuotes(t *testing.T) {
 	if len(content.BeeperLinkPreviews) != 0 {
 		t.Errorf("attached %d preview cards; the quote replaces the card", len(content.BeeperLinkPreviews))
 	}
-	wantPlain := "look: " + url + "\n\n> Avery Wagar in Town Square\n> The backup worked.\n> \n> Links to MM messages are pretty slick."
+	wantPlain := "look: " + url + "\n\n> Erin Example in Town Square\n> The backup worked.\n> \n> Links to MM messages are pretty slick."
 	if content.Body != wantPlain {
 		t.Errorf("body =\n%q\nwant\n%q", content.Body, wantPlain)
 	}
@@ -192,7 +192,7 @@ func TestAttachPermalinkQuotes(t *testing.T) {
 	for _, want := range []string{
 		"look: " + url, // the original message comes first
 		"<blockquote>",
-		`<a href="` + url + `"><strong>Avery Wagar in Town Square</strong></a>`,
+		`<a href="` + url + `"><strong>Erin Example in Town Square</strong></a>`,
 		"The backup worked.",
 		"Links to MM messages are pretty slick.",
 		"</blockquote>",
@@ -235,7 +235,7 @@ func TestAttachPermalinkQuotesRendersMarkdownAndEscapes(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	c := &MattermostClient{Token: "tok", baseURL: srv.URL}
+	c := &MattermostClient{nameFormat: mattermost.NameFormatNicknameFullName, Token: "tok", baseURL: srv.URL}
 	url := srv.URL + "/fpl/pl/" + testPostID
 	// An existing HTML body is kept and the quote is appended to it.
 	content := &event.MessageEventContent{Body: url, Format: event.FormatHTML, FormattedBody: "<em>see</em> " + url}
@@ -266,7 +266,7 @@ func TestAttachPermalinkQuotesBudget(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(mattermost.Post{ID: id, Message: long})
 	}))
 	defer srv.Close()
-	c := &MattermostClient{Token: "tok", baseURL: srv.URL}
+	c := &MattermostClient{nameFormat: mattermost.NameFormatNicknameFullName, Token: "tok", baseURL: srv.URL}
 	text := srv.URL + "/fpl/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa " + srv.URL + "/fpl/pl/bbbbbbbbbbbbbbbbbbbbbbbbbb"
 	content := &event.MessageEventContent{Body: text}
 	c.attachPermalinkQuotes(context.Background(), content, text)
@@ -290,7 +290,7 @@ func TestConvertPostAndEditQuotePermalink(t *testing.T) {
 	srv := previewServer(t, &requests)
 	defer srv.Close()
 	url := srv.URL + "/fpl/pl/" + testPostID
-	c := &MattermostClient{Token: "tok", baseURL: srv.URL, UserID: "me"}
+	c := &MattermostClient{nameFormat: mattermost.NameFormatNicknameFullName, Token: "tok", baseURL: srv.URL, UserID: "me"}
 
 	cm, err := c.convertPost(context.Background(), nil, "!room:test", &mattermost.Post{ID: "p1", UserID: "u2", ChannelID: "c1", Message: url})
 	if err != nil || cm == nil || len(cm.Parts) == 0 {

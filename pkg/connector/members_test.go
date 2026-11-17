@@ -21,7 +21,8 @@ import (
 
 func memberClient(members map[string][]string, fail bool) *MattermostClient {
 	c := &MattermostClient{
-		Token: "tok", UserID: "me", baseURL: "http://unused.invalid",
+		nameFormat: mattermost.NameFormatNicknameFullName,
+		Token:      "tok", UserID: "me", baseURL: "http://unused.invalid",
 		UserLogin: &bridgev2.UserLogin{UserLogin: &database.UserLogin{ID: "login"}},
 		channelMembersFn: func(channelID string) ([]*mattermost.ChannelMember, error) {
 			if fail {
@@ -54,10 +55,10 @@ func TestChatMembers(t *testing.T) {
 	group := &mattermost.Channel{ID: "g1", Type: "G", Name: "group"}
 	const meID, otherID = "aaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbb"
 	dm := &mattermost.Channel{ID: "d1", Type: "D", Name: meID + "__" + otherID}
-	c := memberClient(map[string][]string{"c1": {"me", "avery", "jm"}, "g1": {"me", "a", "b"}}, false)
+	c := memberClient(map[string][]string{"c1": {"me", "erin", "frank"}, "g1": {"me", "a", "b"}}, false)
 
 	got := c.chatMembers(ctx, channel)
-	if fmt.Sprint(memberIDs(got)) != fmt.Sprint(map[string]bool{"me": true, "avery": true, "jm": true}) {
+	if fmt.Sprint(memberIDs(got)) != fmt.Sprint(map[string]bool{"me": true, "erin": true, "frank": true}) {
 		t.Fatalf("channel members = %v", memberIDs(got))
 	}
 	if !got.IsFull || !got.ExcludeChangesFromTimeline {
@@ -111,7 +112,7 @@ func TestChatMembersTruncatedPageIsNotFull(t *testing.T) {
 }
 
 func TestChannelResyncCarriesMembers(t *testing.T) {
-	c := memberClient(map[string][]string{"c1": {"me", "avery"}}, false)
+	c := memberClient(map[string][]string{"c1": {"me", "erin"}}, false)
 	rs := c.channelResyncEvent(&mattermost.Channel{ID: "c1", Type: "O", DisplayName: "Off-Topic"})
 	if !rs.CreatePortal || rs.PortalKey != (networkid.PortalKey{ID: "c1", Receiver: "login"}) {
 		t.Fatalf("resync targets %+v (create=%v)", rs.PortalKey, rs.CreatePortal)
@@ -120,7 +121,7 @@ func TestChannelResyncCarriesMembers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ids := memberIDs(info.Members); !ids["avery"] || !ids["me"] {
+	if ids := memberIDs(info.Members); !ids["erin"] || !ids["me"] {
 		t.Fatalf("resync members = %v, want the channel's members", ids)
 	}
 	if info.Name == nil || *info.Name != "Off-Topic" || !info.CanBackfill {
@@ -166,7 +167,7 @@ func TestLiveMemberEvents(t *testing.T) {
 		user  string
 		added bool
 		m     event.Membership
-	}{{"avery", true, event.MembershipJoin}, {"jm", false, event.MembershipLeave}}
+	}{{"erin", true, event.MembershipJoin}, {"frank", false, event.MembershipLeave}}
 	for _, w := range want {
 		ev := c.memberChangeEvent(&mattermost.ChannelMemberEvent{ChannelID: "c1", UserID: w.user, Added: w.added})
 		if ev.PortalKey != (networkid.PortalKey{ID: "c1", Receiver: "login"}) {
@@ -183,20 +184,20 @@ func TestLiveMemberEvents(t *testing.T) {
 }
 
 func TestChatMembersCarryProfiles(t *testing.T) {
-	c := memberClient(map[string][]string{"c1": {"me", "avery", "jm"}}, false)
+	c := memberClient(map[string][]string{"c1": {"me", "erin", "frank"}}, false)
 	var asked []string
 	c.usersByIDsFn = func(ids []string) ([]*mattermost.User, error) {
 		asked = ids
 		return []*mattermost.User{
-			{ID: "avery", Username: "avery", FirstName: "Avery"},
-			{ID: "jm", Username: "jm", FirstName: "James", LastName: "Merrill"},
+			{ID: "erin", Username: "erin", FirstName: "Erin"},
+			{ID: "frank", Username: "frank", FirstName: "Frank", LastName: "Example"},
 		}, nil
 	}
 	got := c.chatMembers(context.Background(), &mattermost.Channel{ID: "c1", Type: "O"})
-	if fmt.Sprint(asked) != "[avery jm]" {
+	if fmt.Sprint(asked) != "[erin frank]" {
 		t.Fatalf("profiles requested for %v, want the other members in one request", asked)
 	}
-	for uid, want := range map[string]string{"avery": "Avery", "jm": "James Merrill"} {
+	for uid, want := range map[string]string{"erin": "Erin", "frank": "Frank Example"} {
 		info := got.MemberMap[networkid.UserID(uid)].UserInfo
 		if info == nil || info.Name == nil || *info.Name != want {
 			t.Fatalf("%s UserInfo = %+v, want name %q", uid, info, want)
@@ -211,10 +212,10 @@ func TestChatMembersCarryProfiles(t *testing.T) {
 }
 
 func TestChatMembersProfileFailureStillListsMembers(t *testing.T) {
-	c := memberClient(map[string][]string{"c1": {"me", "avery"}}, false)
+	c := memberClient(map[string][]string{"c1": {"me", "erin"}}, false)
 	c.usersByIDsFn = func([]string) ([]*mattermost.User, error) { return nil, errors.New("boom") }
 	got := c.chatMembers(context.Background(), &mattermost.Channel{ID: "c1", Type: "O"})
-	m, ok := got.MemberMap["avery"]
+	m, ok := got.MemberMap["erin"]
 	if !ok || m.Membership != event.MembershipJoin {
 		t.Fatalf("member dropped when profiles failed: %+v", got.MemberMap)
 	}
@@ -230,10 +231,10 @@ func TestUserUpdatedRefreshesGhost(t *testing.T) {
 	c := memberClient(nil, false)
 	got := make(chan *mattermost.User, 1)
 	c.refreshGhostFn = func(u *mattermost.User) { got <- u }
-	c.handleUserUpdated(&mattermost.User{ID: "avery", FirstName: "Avery", LastName: "Wagar"})
+	c.handleUserUpdated(&mattermost.User{ID: "erin", FirstName: "Erin", LastName: "Example"})
 	select {
 	case u := <-got:
-		if u.ID != "avery" {
+		if u.ID != "erin" {
 			t.Fatalf("refreshed %+v", u)
 		}
 	case <-time.After(2 * time.Second):
@@ -241,15 +242,15 @@ func TestUserUpdatedRefreshesGhost(t *testing.T) {
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if u := c.users["avery"]; u == nil || u.LastName != "Wagar" {
+	if u := c.users["erin"]; u == nil || u.LastName != "Example" {
 		t.Fatal("user_updated did not update the cache")
 	}
 }
 
 func TestUserInfoNameHasNoTrailingSpace(t *testing.T) {
-	c := &MattermostClient{}
-	info := c.userInfo(&mattermost.User{ID: "u", Username: "avery", FirstName: "Avery"})
-	if *info.Name != "Avery" {
+	c := &MattermostClient{nameFormat: mattermost.NameFormatNicknameFullName}
+	info := c.userInfo(&mattermost.User{ID: "u", Username: "erin", FirstName: "Erin"})
+	if *info.Name != "Erin" {
 		t.Fatalf("name = %q", *info.Name)
 	}
 }

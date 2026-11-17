@@ -48,6 +48,11 @@ type MattermostClient struct {
 	// updates in tests.
 	usersByIDsFn   func(ids []string) ([]*mattermost.User, error)
 	refreshGhostFn func(u *mattermost.User)
+	// nameFormat is the Mattermost name format in use (see displaynames.go).
+	// Guarded by mu.
+	nameFormat string
+	// displayNamesFn overrides network.display_names in tests.
+	displayNamesFn func() string
 	// channelMembersFn overrides the channel member fetch in tests.
 	channelMembersFn func(channelID string) ([]*mattermost.ChannelMember, error)
 	// presenceWake wakes the presence poller early (see presence.go). Guarded by mu
@@ -169,7 +174,7 @@ func (c *MattermostClient) channelResyncEvent(ch *mattermost.Channel) *simpleven
 		if otherID := dmOtherUserID(ch.Name, c.UserID); otherID != "" {
 			c.mu.RLock()
 			if u, ok := c.users[otherID]; ok {
-				n := u.DisplayName()
+				n := c.displayName(u)
 				name = &n
 			}
 			c.mu.RUnlock()
@@ -204,6 +209,8 @@ func (c *MattermostClient) Connect(ctx context.Context) {
 			c.UserID = id
 		}
 	}
+	// Before anything is synced, so names come out in the right format.
+	c.resolveNameFormat(c.lifecycleLogger())
 	c.done = make(chan struct{})
 	c.startPresencePoller(c.done)
 	go c.connectLoop()
@@ -634,7 +641,7 @@ func (c *MattermostClient) resolveDisplayName(userID string) string {
 	u, ok := c.users[userID]
 	c.mu.RUnlock()
 	if ok {
-		return u.DisplayName()
+		return c.displayName(u)
 	}
 	// Fetch and cache.
 	fetched, err := mattermost.GetUser(c.serverURL(), c.Token, userID)
@@ -647,7 +654,7 @@ func (c *MattermostClient) resolveDisplayName(userID string) string {
 	}
 	c.users[userID] = fetched
 	c.mu.Unlock()
-	return fetched.DisplayName()
+	return c.displayName(fetched)
 }
 
 // sendNotice queues a notice m.text event into a channel portal.
