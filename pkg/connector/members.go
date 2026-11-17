@@ -163,29 +163,42 @@ func joinedMember(userID string) bridgev2.ChatMember {
 // exists; their own removal is left to the channel lifecycle handling.
 func (c *MattermostClient) handleChannelMemberEvent(evt *mattermost.ChannelMemberEvent) {
 	if evt.UserID == c.UserID {
-		if !evt.Added {
-			return
+		if evt.Added {
+			go func() {
+				if rs := c.joinedChannelResync(evt.ChannelID); rs != nil {
+					c.queueEvent(rs)
+				}
+			}()
 		}
-		go func(channelID string) {
-			ch, err := mattermost.GetChannel(c.serverURL(), c.Token, channelID)
-			if err != nil {
-				return
-			}
-			c.mu.Lock()
-			if c.channels == nil {
-				c.channels = make(map[string]*mattermost.Channel)
-			}
-			c.channels[ch.ID] = ch
-			c.mu.Unlock()
-			c.queueChannelResync(ch)
-		}(evt.ChannelID)
 		return
 	}
+	c.queueEvent(c.memberChangeEvent(evt))
+}
+
+// joinedChannelResync fetches a channel the logged-in user was just added to
+// and returns the resync that creates its room, or nil if it can't be fetched.
+func (c *MattermostClient) joinedChannelResync(channelID string) *simplevent.ChatResync {
+	ch, err := mattermost.GetChannel(c.serverURL(), c.Token, channelID)
+	if err != nil {
+		return nil
+	}
+	c.mu.Lock()
+	if c.channels == nil {
+		c.channels = make(map[string]*mattermost.Channel)
+	}
+	c.channels[ch.ID] = ch
+	c.mu.Unlock()
+	return c.channelResyncEvent(ch)
+}
+
+// memberChangeEvent builds the room update for another user's live join or
+// leave.
+func (c *MattermostClient) memberChangeEvent(evt *mattermost.ChannelMemberEvent) *simplevent.ChatInfoChange {
 	membership := event.MembershipJoin
 	if !evt.Added {
 		membership = event.MembershipLeave
 	}
-	c.queueEvent(&simplevent.ChatInfoChange{
+	return &simplevent.ChatInfoChange{
 		EventMeta: simplevent.EventMeta{
 			Type:      bridgev2.RemoteEventChatInfoChange,
 			PortalKey: networkid.PortalKey{ID: networkid.PortalID(evt.ChannelID), Receiver: c.UserLogin.ID},
@@ -195,7 +208,23 @@ func (c *MattermostClient) handleChannelMemberEvent(evt *mattermost.ChannelMembe
 			},
 		},
 		ChatInfoChange: memberChange(evt.UserID, membership),
-	})
+	}
+}
+
+// handleUserUpdated caches a changed Mattermost profile and pushes it to the
+// user's ghost, so renames reach Matrix, not only the cache.
+func (c *MattermostClient) handleUserUpdated(u *mattermost.User) {
+	c.mu.Lock()
+	if c.users == nil {
+		c.users = make(map[string]*mattermost.User)
+	}
+	c.users[u.ID] = u
+	c.mu.Unlock()
+	ctx := context.Background()
+	if c.UserLogin != nil {
+		ctx = c.UserLogin.Log.WithContext(ctx)
+	}
+	go c.refreshGhost(ctx, u)
 }
 
 // memberChange is the ChatInfoChange for one live join or leave. It is shown
