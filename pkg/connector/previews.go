@@ -158,7 +158,7 @@ func (c *MattermostClient) resolvePermalink(postID string) *quotedPost {
 		c.storeQuote(postID, nil) // remember the failure, briefly
 		return nil
 	}
-	q := &quotedPost{Text: normalizePostText(post.Message)}
+	q := &quotedPost{Text: normalizePostText(postMarkdown(post))}
 	var author, channel string
 	if post.UserID != "" {
 		if u, err := mattermost.GetUser(c.serverURL(), c.Token, post.UserID); err == nil && u != nil {

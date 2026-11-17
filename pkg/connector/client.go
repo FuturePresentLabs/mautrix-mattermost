@@ -686,8 +686,9 @@ func (c *MattermostClient) sendNotice(channelID networkid.PortalID, body string)
 // editContent is the new content for an edited post. Linked posts are quoted
 // again, so an edit does not drop the quote the original message carried.
 func (c *MattermostClient) editContent(ctx context.Context, post *mattermost.Post) *event.MessageEventContent {
-	rendered := c.renderPostText(ctx, post.Message)
+	text := postMarkdown(post)
+	rendered := c.renderPostText(ctx, text)
 	content := &rendered
-	c.attachPermalinkQuotes(ctx, content, post.Message)
+	c.attachPermalinkQuotes(ctx, content, text)
 	return content
 }
