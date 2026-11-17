@@ -178,6 +178,18 @@ Statuses come from the same 30-second poll as presence (see below), which runs w
 either feature is on. Matrix presence itself is not needed, which matters on Beeper:
 its homeserver drops presence, but titles always show.
 
+## Spaces and read sync
+
+Each Mattermost team is a Matrix space, named and pictured like the team (its icon
+follows changes in Mattermost). The team's channels are in its space, so channels with
+the same name in two teams, such as Town Square, are told apart by their space. DMs and
+group DMs belong to no team and stay outside the team spaces.
+
+Reading is synced both ways. Reading a room or thread in Matrix marks it read in
+Mattermost, and viewing a channel in Mattermost marks it read in Matrix. Mattermost can
+only mark a channel read up to the present, so a message arriving in the second between
+your client showing a room and the bridge passing on the receipt is marked read as well.
+
 ## About this fork
 
 This fork tracks upstream and carries the changes below. They are also open as upstream pull requests, so some or all of them may eventually be merged there.
@@ -190,6 +202,7 @@ This fork tracks upstream and carries the changes below. They are also open as u
 | Linked Mattermost posts are quoted under their permalinks | [#11](https://github.com/bostrot/mautrix-mattermost/pull/11) |
 | @mentions in both directions, full room member lists, current ghost names, configurable display names | not yet opened |
 | Status on DM titles (`network.dm_status`) | fork-only for now |
+| Read sync, one space per team | fork-only for now |
 
 Optional presence publishing (see [Presence](#presence-optional)) is fork-only and has
 no upstream PR yet.

@@ -215,6 +215,9 @@ type Team struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"display_name"`
 	Name        string `json:"name"`
+	// LastTeamIconUpdate is when the team icon last changed (ms); 0 means
+	// the team has no icon.
+	LastTeamIconUpdate int64 `json:"last_team_icon_update"`
 }
 
 // ChannelMember represents a user's membership in a channel.
@@ -350,6 +353,11 @@ type StatusChangeEvent struct {
 // UserUpdatedEvent signals a user profile changed.
 type UserUpdatedEvent struct {
 	User *User
+}
+
+// TeamUpdatedEvent signals a team's name or icon changed.
+type TeamUpdatedEvent struct {
+	Team *Team
 }
 
 // ChannelsViewedEvent signals the logged-in user read channels in Mattermost.

@@ -12,6 +12,9 @@ import (
 
 // GetChatInfo returns Matrix room metadata for a Mattermost channel.
 func (c *MattermostClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
+	if teamID, ok := teamIDFromPortal(portal.ID); ok {
+		return c.teamChatInfo(teamID)
+	}
 	chID := string(portal.ID)
 
 	c.mu.RLock()
@@ -65,6 +68,9 @@ func (c *MattermostClient) GetChatInfo(ctx context.Context, portal *bridgev2.Por
 		Name:    name,
 		Type:    &roomType,
 		Members: members,
+	}
+	if ok {
+		info.ParentID = channelParent(ch)
 	}
 	// A DM is titled after the other person, with their status (dmstatus.go).
 	if ok {
