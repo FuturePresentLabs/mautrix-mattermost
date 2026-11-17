@@ -146,14 +146,16 @@ func GetNameDisplaySettings(serverURL, token string) (NameDisplaySettings, error
 }
 
 // GetNameFormatPreference returns the logged-in user's own name display
-// preference, or "" when they have not set one.
+// preference, or "" when they have not set one. Mattermost answers an unset
+// preference with app.preference.get.app_error (HTTP 400 on 12.x, 404 on
+// older servers); any other failure is returned.
 func GetNameFormatPreference(serverURL, token string) (string, error) {
 	var pref struct {
 		Value string `json:"value"`
 	}
 	err := doGet(serverURL, token, "/api/v4/users/me/preferences/display_settings/name/name_format", &pref)
 	var httpErr *HTTPError
-	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+	if errors.As(err, &httpErr) && (httpErr.ErrorID == "app.preference.get.app_error" || httpErr.StatusCode == http.StatusNotFound) {
 		return "", nil
 	}
 	if err != nil {

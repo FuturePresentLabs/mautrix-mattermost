@@ -54,8 +54,9 @@ func newNameServer(t *testing.T) *nameServer {
 				return
 			}
 			if ns.pref == "" {
-				w.WriteHeader(http.StatusNotFound)
-				_, _ = w.Write([]byte(`{"id":"app.preference.get.app_error","status_code":404}`))
+				// What Mattermost 12 sends for an unset preference.
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"id":"app.preference.get.app_error","message":"We encountered an error while finding preferences.","status_code":400}`))
 				return
 			}
 			_ = json.NewEncoder(w).Encode(map[string]string{"category": "display_settings", "name": "name_format", "value": ns.pref})
@@ -272,8 +273,22 @@ func TestNameFormatPreferenceRequests(t *testing.T) {
 	if pref, err = mattermost.GetNameFormatPreference(srv.URL, "tok"); err != nil || pref != "full_name" {
 		t.Fatalf("got %q, %v", pref, err)
 	}
-	srv.failPref = true
+	srv.failPref = true // a 500 with no Mattermost error id
 	if _, err = mattermost.GetNameFormatPreference(srv.URL, "tok"); err == nil {
 		t.Fatal("a server error must be returned, not read as \"no preference\"")
+	}
+}
+
+func TestUnsetPreferenceIsNotAWarning(t *testing.T) {
+	srv := newNameServer(t)
+	srv.def = mattermost.NameFormatFullName
+	var buf strings.Builder
+	c := nameClient(srv, "server")
+	c.resolveNameFormat(zerolog.New(&buf))
+	if strings.Contains(buf.String(), `"level":"warn"`) {
+		t.Fatalf("an unset preference logged a warning:\n%s", buf.String())
+	}
+	if c.displayName(fullUser) != "Alice Example" {
+		t.Fatal("server default not applied")
 	}
 }
