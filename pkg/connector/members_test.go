@@ -14,14 +14,12 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
-	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/event"
 
 	"github.com/bostrot/mautrix-mattermost/pkg/mattermost"
 )
 
-func memberClient(members map[string][]string, fail bool) (*MattermostClient, *eventRecorder) {
-	rec := &eventRecorder{}
+func memberClient(members map[string][]string, fail bool) *MattermostClient {
 	c := &MattermostClient{
 		Token: "tok", UserID: "me", baseURL: "http://unused.invalid",
 		UserLogin: &bridgev2.UserLogin{UserLogin: &database.UserLogin{ID: "login"}},
@@ -36,8 +34,7 @@ func memberClient(members map[string][]string, fail bool) (*MattermostClient, *e
 			return out, nil
 		},
 	}
-	c.queueRemoteEventFn = rec.queue
-	return c, rec
+	return c
 }
 
 func memberIDs(l *bridgev2.ChatMemberList) map[string]bool {
@@ -57,7 +54,7 @@ func TestChatMembers(t *testing.T) {
 	group := &mattermost.Channel{ID: "g1", Type: "G", Name: "group"}
 	const meID, otherID = "aaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbb"
 	dm := &mattermost.Channel{ID: "d1", Type: "D", Name: meID + "__" + otherID}
-	c, _ := memberClient(map[string][]string{"c1": {"me", "avery", "jm"}, "g1": {"me", "a", "b"}}, false)
+	c := memberClient(map[string][]string{"c1": {"me", "avery", "jm"}, "g1": {"me", "a", "b"}}, false)
 
 	got := c.chatMembers(ctx, channel)
 	if fmt.Sprint(memberIDs(got)) != fmt.Sprint(map[string]bool{"me": true, "avery": true, "jm": true}) {
@@ -88,7 +85,7 @@ func TestChatMembers(t *testing.T) {
 }
 
 func TestChatMembersFetchFailureRemovesNobody(t *testing.T) {
-	c, _ := memberClient(nil, true)
+	c := memberClient(nil, true)
 	got := c.chatMembers(context.Background(), &mattermost.Channel{ID: "c1", Type: "O"})
 	if got.IsFull {
 		t.Fatal("a failed fetch must not be treated as the full list (it would remove everyone)")
@@ -103,7 +100,7 @@ func TestChatMembersTruncatedPageIsNotFull(t *testing.T) {
 	for i := 0; i < channelMembersPageSize; i++ {
 		many = append(many, fmt.Sprintf("u%d", i))
 	}
-	c, _ := memberClient(map[string][]string{"big": many}, false)
+	c := memberClient(map[string][]string{"big": many}, false)
 	got := c.chatMembers(context.Background(), &mattermost.Channel{ID: "big", Type: "O"})
 	if got.IsFull {
 		t.Fatal("a page-sized response may be truncated and must not remove members")
@@ -114,12 +111,11 @@ func TestChatMembersTruncatedPageIsNotFull(t *testing.T) {
 }
 
 func TestChannelResyncCarriesMembers(t *testing.T) {
-	c, rec := memberClient(map[string][]string{"c1": {"me", "avery"}}, false)
-	c.queueChannelResync(&mattermost.Channel{ID: "c1", Type: "O", DisplayName: "Off-Topic"})
-	if rec.len() != 1 {
-		t.Fatalf("queued %d events", rec.len())
+	c := memberClient(map[string][]string{"c1": {"me", "avery"}}, false)
+	rs := c.channelResyncEvent(&mattermost.Channel{ID: "c1", Type: "O", DisplayName: "Off-Topic"})
+	if !rs.CreatePortal || rs.PortalKey != (networkid.PortalKey{ID: "c1", Receiver: "login"}) {
+		t.Fatalf("resync targets %+v (create=%v)", rs.PortalKey, rs.CreatePortal)
 	}
-	rs := rec.events[0].(*simplevent.ChatResync)
 	info, err := rs.GetChatInfo(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -144,58 +140,50 @@ func TestOwnMembershipEvents(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
+	c := memberClient(map[string][]string{"c1": {"me"}}, false)
+	c.baseURL = srv.URL
 
 	// Being removed must not resync (and so re-create) the channel's room.
-	c, rec := memberClient(map[string][]string{"c1": {"me"}}, false)
-	c.baseURL = srv.URL
 	c.handleChannelMemberEvent(&mattermost.ChannelMemberEvent{ChannelID: "c1", UserID: "me", Added: false})
 	time.Sleep(200 * time.Millisecond)
-	if rec.len() != 0 || fetches.Load() != 0 {
-		t.Fatalf("own removal queued %d events and fetched the channel %d times, want none", rec.len(), fetches.Load())
+	if n := fetches.Load(); n != 0 {
+		t.Fatalf("own removal fetched the channel %d times, want none", n)
 	}
 
-	// Being added resyncs the channel so its room is created.
-	c.handleChannelMemberEvent(&mattermost.ChannelMemberEvent{ChannelID: "c1", UserID: "me", Added: true})
-	deadline := time.Now().Add(3 * time.Second)
-	for rec.len() == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+	// Being added builds the resync that creates the room.
+	rs := c.joinedChannelResync("c1")
+	if rs == nil || rs.PortalKey.ID != "c1" || !rs.CreatePortal {
+		t.Fatalf("own addition resync = %+v", rs)
 	}
-	if rec.len() != 1 {
-		t.Fatalf("own addition queued %d events, want 1 resync", rec.len())
-	}
-	if _, ok := rec.events[0].(*simplevent.ChatResync); !ok {
-		t.Fatalf("own addition queued %T, want a ChatResync", rec.events[0])
+	if c.joinedChannelResync("missing") != nil {
+		t.Fatal("a channel that can't be fetched must not produce a resync")
 	}
 }
 
 func TestLiveMemberEvents(t *testing.T) {
-	c, rec := memberClient(nil, false)
-	c.handleChannelMemberEvent(&mattermost.ChannelMemberEvent{ChannelID: "c1", UserID: "avery", Added: true})
-	c.handleChannelMemberEvent(&mattermost.ChannelMemberEvent{ChannelID: "c1", UserID: "jm", Added: false})
-	if rec.len() != 2 {
-		t.Fatalf("queued %d events, want 2", rec.len())
-	}
+	c := memberClient(nil, false)
 	want := []struct {
-		user string
-		m    event.Membership
-	}{{"avery", event.MembershipJoin}, {"jm", event.MembershipLeave}}
-	for i, w := range want {
-		ev := rec.events[i].(*simplevent.ChatInfoChange)
+		user  string
+		added bool
+		m     event.Membership
+	}{{"avery", true, event.MembershipJoin}, {"jm", false, event.MembershipLeave}}
+	for _, w := range want {
+		ev := c.memberChangeEvent(&mattermost.ChannelMemberEvent{ChannelID: "c1", UserID: w.user, Added: w.added})
 		if ev.PortalKey != (networkid.PortalKey{ID: "c1", Receiver: "login"}) {
-			t.Fatalf("event %d portal = %+v", i, ev.PortalKey)
+			t.Fatalf("%s: portal = %+v", w.user, ev.PortalKey)
 		}
 		mc := ev.ChatInfoChange.MemberChanges
 		if mc == nil || mc.IsFull || mc.ExcludeChangesFromTimeline {
-			t.Fatalf("event %d member changes = %+v; live changes must be partial and visible", i, mc)
+			t.Fatalf("%s: member changes = %+v; live changes must be partial and visible", w.user, mc)
 		}
 		if m := mc.MemberMap[networkid.UserID(w.user)]; m.Membership != w.m {
-			t.Fatalf("event %d: %s membership = %q, want %q", i, w.user, m.Membership, w.m)
+			t.Fatalf("%s membership = %q, want %q", w.user, m.Membership, w.m)
 		}
 	}
 }
 
 func TestChatMembersCarryProfiles(t *testing.T) {
-	c, _ := memberClient(map[string][]string{"c1": {"me", "avery", "jm"}}, false)
+	c := memberClient(map[string][]string{"c1": {"me", "avery", "jm"}}, false)
 	var asked []string
 	c.usersByIDsFn = func(ids []string) ([]*mattermost.User, error) {
 		asked = ids
@@ -223,7 +211,7 @@ func TestChatMembersCarryProfiles(t *testing.T) {
 }
 
 func TestChatMembersProfileFailureStillListsMembers(t *testing.T) {
-	c, _ := memberClient(map[string][]string{"c1": {"me", "avery"}}, false)
+	c := memberClient(map[string][]string{"c1": {"me", "avery"}}, false)
 	c.usersByIDsFn = func([]string) ([]*mattermost.User, error) { return nil, errors.New("boom") }
 	got := c.chatMembers(context.Background(), &mattermost.Channel{ID: "c1", Type: "O"})
 	m, ok := got.MemberMap["avery"]
@@ -239,10 +227,10 @@ func TestChatMembersProfileFailureStillListsMembers(t *testing.T) {
 }
 
 func TestUserUpdatedRefreshesGhost(t *testing.T) {
-	p := newProcessEventsHarness(t, lifecycleOptions{probe: activeProbe})
+	c := memberClient(nil, false)
 	got := make(chan *mattermost.User, 1)
-	p.client.refreshGhostFn = func(u *mattermost.User) { got <- u }
-	p.deliver(&mattermost.UserUpdatedEvent{User: &mattermost.User{ID: "avery", FirstName: "Avery", LastName: "Wagar"}})
+	c.refreshGhostFn = func(u *mattermost.User) { got <- u }
+	c.handleUserUpdated(&mattermost.User{ID: "avery", FirstName: "Avery", LastName: "Wagar"})
 	select {
 	case u := <-got:
 		if u.ID != "avery" {
@@ -251,9 +239,9 @@ func TestUserUpdatedRefreshesGhost(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("user_updated did not refresh the ghost")
 	}
-	p.client.mu.RLock()
-	defer p.client.mu.RUnlock()
-	if u := p.client.users["avery"]; u == nil || u.LastName != "Wagar" {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if u := c.users["avery"]; u == nil || u.LastName != "Wagar" {
 		t.Fatal("user_updated did not update the cache")
 	}
 }

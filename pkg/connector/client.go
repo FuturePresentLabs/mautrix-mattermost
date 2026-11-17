@@ -144,6 +144,12 @@ func (c *MattermostClient) serverURL() string {
 
 // queueChannelResync queues a ChatResync event for a single Mattermost channel.
 func (c *MattermostClient) queueChannelResync(ch *mattermost.Channel) {
+	c.queueEvent(c.channelResyncEvent(ch))
+}
+
+// channelResyncEvent builds the ChatResync that creates or refreshes a
+// channel's room.
+func (c *MattermostClient) channelResyncEvent(ch *mattermost.Channel) *simplevent.ChatResync {
 	roomType := database.RoomTypeDefault
 	switch {
 	case ch.IsDM():
@@ -170,7 +176,7 @@ func (c *MattermostClient) queueChannelResync(ch *mattermost.Channel) {
 		}
 	}
 
-	c.queueEvent(&simplevent.ChatResync{
+	return &simplevent.ChatResync{
 		EventMeta: simplevent.EventMeta{
 			Type:         bridgev2.RemoteEventChatResync,
 			CreatePortal: true,
@@ -188,7 +194,7 @@ func (c *MattermostClient) queueChannelResync(ch *mattermost.Channel) {
 			}, nil
 		},
 		CheckNeedsBackfillFunc: func(_ context.Context, _ *database.Message) (bool, error) { return true, nil },
-	})
+	}
 }
 
 func (c *MattermostClient) Connect(ctx context.Context) {
@@ -491,14 +497,7 @@ func (c *MattermostClient) processEvents() {
 			if evt.User == nil {
 				continue
 			}
-			c.mu.Lock()
-			if c.users == nil {
-				c.users = make(map[string]*mattermost.User)
-			}
-			c.users[evt.User.ID] = evt.User
-			c.mu.Unlock()
-			// Renames reach Matrix too, not just the cache.
-			go c.refreshGhost(c.UserLogin.Log.WithContext(context.Background()), evt.User)
+			c.handleUserUpdated(evt.User)
 
 		case *mattermost.AuthErrorEvent:
 			c.UserLogin.BridgeState.Send(status.BridgeState{
