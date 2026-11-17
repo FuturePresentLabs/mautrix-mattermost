@@ -106,20 +106,25 @@ func (c *MattermostClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghos
 		c.mu.Unlock()
 	}
 
-	name := u.DisplayName()
-	info := &bridgev2.UserInfo{
-		Name: &name,
-	}
+	return c.userInfo(u), nil
+}
 
-	// Profile picture: fetched via the authenticated image endpoint.
-	avatarURL := mattermost.ProfileImageURL(c.serverURL(), userID)
+// userInfo is the ghost profile for a Mattermost user. GetUserInfo, member
+// syncs and user_updated events all use it, so a ghost's name is always the
+// same function of the Mattermost profile.
+func (c *MattermostClient) userInfo(u *mattermost.User) *bridgev2.UserInfo {
+	name := u.DisplayName()
+	info := &bridgev2.UserInfo{Name: &name}
+
+	// Profile picture: fetched via the authenticated image endpoint. The ID
+	// is stable per user, so repeating it does not re-upload the image.
+	avatarURL := mattermost.ProfileImageURL(c.serverURL(), u.ID)
 	token := c.Token
 	info.Avatar = &bridgev2.Avatar{
-		ID: networkid.AvatarID(userID + "_avatar"),
+		ID: networkid.AvatarID(u.ID + "_avatar"),
 		Get: func(ctx context.Context) ([]byte, error) {
 			return fetchImage(ctx, avatarURL, token)
 		},
 	}
-
-	return info, nil
+	return info
 }

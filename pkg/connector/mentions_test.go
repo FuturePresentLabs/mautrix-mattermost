@@ -335,3 +335,50 @@ func TestSplitHTMLTextProtectsCodeAndLinks(t *testing.T) {
 		t.Fatalf("rewritable text = %q", text)
 	}
 }
+
+// TestOutboundPlainTextMentions covers how Beeper actually sends a mention:
+// plain "@Display Name" text plus m.mentions, with no HTML pill.
+func TestOutboundPlainTextMentions(t *testing.T) {
+	ghostNames := map[string]string{
+		"ualice": "Alice Example",
+		"ubob":   "Bobby ",  // stale ghost name with a trailing space
+		"uund":   "Dee Dee", // ghost name differs from the Mattermost display name
+	}
+	cases := []struct {
+		name     string
+		body     string
+		mentions []id.UserID
+		want     string
+	}{
+		{"display name differs from username", "@Alice Example and hi", []id.UserID{ghostMXID("ualice")}, "@alice and hi"},
+		{"two people, as Beeper sends them", "@Alice Example and @Bobby  testing", []id.UserID{ghostMXID("ualice"), ghostMXID("ubob")}, "@alice and @bob.smith  testing"},
+		{"ghost name or current display name", "@Dee Dee / @Dee", []id.UserID{ghostMXID("uund")}, "@dee_dee / @dee_dee"},
+		{"at end of text", "thanks @Alice Example", []id.UserID{ghostMXID("ualice")}, "thanks @alice"},
+		{"punctuation after the name", "@Alice Example, look", []id.UserID{ghostMXID("ualice")}, "@alice, look"},
+		{"case-insensitive", "@alice example hi", []id.UserID{ghostMXID("ualice")}, "@alice hi"},
+		{"same person twice in a row", "@Alice Example @Alice Example", []id.UserID{ghostMXID("ualice")}, "@alice @alice"},
+		{"own account", "note to @Carol Self", []id.UserID{selfMXID}, "note to @carol"},
+		{"not listed in m.mentions: untouched", "@Alice Example hi", nil, "@Alice Example hi"},
+		{"longer name is not cut short", "@Alice Examples hi", []id.UserID{ghostMXID("ualice")}, "@Alice Examples hi"},
+		{"email address untouched", "mail x@Alice Example", []id.UserID{ghostMXID("ualice")}, "mail x@Alice Example"},
+		{"unknown Matrix user untouched", "@Stranger hi", []id.UserID{"@stranger:example.com"}, "@Stranger hi"},
+		{"username starting with the name is replaced once", "@Bobby. hi @Bobby", []id.UserID{ghostMXID("ubob")}, "@bob.smith. hi @bob.smith"},
+		{"non-ASCII letter after the name is not a boundary", "@Alice Exampleé hi", []id.UserID{ghostMXID("ualice")}, "@Alice Exampleé hi"},
+		{"doubled @ is not a mention", "@@Alice Example hi", []id.UserID{ghostMXID("ualice")}, "@@Alice Example hi"},
+		{"non-ASCII letter before the @ is not a boundary", "é@Alice Example hi", []id.UserID{ghostMXID("ualice")}, "é@Alice Example hi"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newMentionServer(t)
+			c := newMentionClient(srv)
+			c.ghostNameFn = func(mmID string) string { return ghostNames[mmID] }
+			content := event.MessageEventContent{MsgType: event.MsgText, Body: tc.body}
+			if tc.mentions != nil {
+				content.Mentions = &event.Mentions{UserIDs: tc.mentions}
+			}
+			if got := c.outboundMarkdown(context.Background(), &content); got != tc.want {
+				t.Fatalf("outboundMarkdown = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

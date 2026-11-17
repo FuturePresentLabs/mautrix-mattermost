@@ -57,15 +57,79 @@ func (c *MattermostClient) chatMembers(ctx context.Context, ch *mattermost.Chann
 			Msg("Failed to fetch channel members; listing only the logged-in user")
 		return list
 	}
+	var ids []string
 	for _, m := range members {
 		if m == nil || m.UserID == "" || m.UserID == c.UserID {
 			continue
 		}
-		memberMap[networkid.UserID(m.UserID)] = joinedMember(m.UserID)
+		ids = append(ids, m.UserID)
+	}
+	// Carry each member's profile, so a sync also corrects ghost names that
+	// were set from an older profile (bridgev2 only sets a ghost's name once
+	// on its own). Without profiles the members are still listed.
+	profiles := c.memberProfiles(ctx, ids)
+	for _, uid := range ids {
+		member := joinedMember(uid)
+		if u := profiles[uid]; u != nil {
+			member.UserInfo = c.userInfo(u)
+		}
+		memberMap[networkid.UserID(uid)] = member
 	}
 	list.IsFull = len(members) < channelMembersPageSize
 	list.TotalMemberCount = len(members)
 	return list
+}
+
+// memberProfiles fetches the profiles of the given users in one request and
+// caches them. On failure it returns what is cached.
+func (c *MattermostClient) memberProfiles(ctx context.Context, ids []string) map[string]*mattermost.User {
+	out := make(map[string]*mattermost.User, len(ids))
+	if len(ids) == 0 {
+		return out
+	}
+	var fetched []*mattermost.User
+	var err error
+	if c.usersByIDsFn != nil {
+		fetched, err = c.usersByIDsFn(ids)
+	} else {
+		fetched, err = mattermost.GetUsersByIDs(c.serverURL(), c.Token, ids)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.users == nil {
+		c.users = make(map[string]*mattermost.User)
+	}
+	if err != nil {
+		zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to fetch member profiles; ghost names are not refreshed")
+	}
+	for _, u := range fetched {
+		if u != nil && u.ID != "" {
+			c.users[u.ID] = u
+		}
+	}
+	for _, id := range ids {
+		if u := c.users[id]; u != nil {
+			out[id] = u
+		}
+	}
+	return out
+}
+
+// refreshGhost pushes a changed Mattermost profile to the user's ghost, if the
+// bridge already has one.
+func (c *MattermostClient) refreshGhost(ctx context.Context, u *mattermost.User) {
+	if c.refreshGhostFn != nil {
+		c.refreshGhostFn(u)
+		return
+	}
+	if u == nil || c.UserLogin == nil || c.UserLogin.Bridge == nil || c.UserLogin.Bridge.DB == nil {
+		return
+	}
+	ghost, err := c.UserLogin.Bridge.GetExistingGhostByID(ctx, networkid.UserID(u.ID))
+	if err != nil || ghost == nil {
+		return
+	}
+	ghost.UpdateInfo(ctx, c.userInfo(u))
 }
 
 func (c *MattermostClient) fetchChannelMembers(channelID string) ([]*mattermost.ChannelMember, error) {

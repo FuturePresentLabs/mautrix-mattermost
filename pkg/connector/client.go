@@ -42,6 +42,12 @@ type MattermostClient struct {
 	// tests. When nil, the bridge's Matrix connector is used.
 	ghostMXIDFn  func(mmUserID string) id.UserID
 	parseGhostFn func(mxid id.UserID) string
+	// ghostNameFn overrides reading a ghost's Matrix name in tests.
+	ghostNameFn func(mmUserID string) string
+	// usersByIDsFn and refreshGhostFn override profile fetches and ghost
+	// updates in tests.
+	usersByIDsFn   func(ids []string) ([]*mattermost.User, error)
+	refreshGhostFn func(u *mattermost.User)
 	// channelMembersFn overrides the channel member fetch in tests.
 	channelMembersFn func(channelID string) ([]*mattermost.ChannelMember, error)
 	// presenceWake wakes the presence poller early (see presence.go). Guarded by mu
@@ -491,6 +497,8 @@ func (c *MattermostClient) processEvents() {
 			}
 			c.users[evt.User.ID] = evt.User
 			c.mu.Unlock()
+			// Renames reach Matrix too, not just the cache.
+			go c.refreshGhost(c.UserLogin.Log.WithContext(context.Background()), evt.User)
 
 		case *mattermost.AuthErrorEvent:
 			c.UserLogin.BridgeState.Send(status.BridgeState{

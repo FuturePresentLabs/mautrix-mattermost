@@ -187,3 +187,75 @@ func TestLiveMemberEvents(t *testing.T) {
 		}
 	}
 }
+
+func TestChatMembersCarryProfiles(t *testing.T) {
+	c, _ := memberClient(map[string][]string{"c1": {"me", "avery", "jm"}}, false)
+	var asked []string
+	c.usersByIDsFn = func(ids []string) ([]*mattermost.User, error) {
+		asked = ids
+		return []*mattermost.User{
+			{ID: "avery", Username: "avery", FirstName: "Avery"},
+			{ID: "jm", Username: "jm", FirstName: "James", LastName: "Merrill"},
+		}, nil
+	}
+	got := c.chatMembers(context.Background(), &mattermost.Channel{ID: "c1", Type: "O"})
+	if fmt.Sprint(asked) != "[avery jm]" {
+		t.Fatalf("profiles requested for %v, want the other members in one request", asked)
+	}
+	for uid, want := range map[string]string{"avery": "Avery", "jm": "James Merrill"} {
+		info := got.MemberMap[networkid.UserID(uid)].UserInfo
+		if info == nil || info.Name == nil || *info.Name != want {
+			t.Fatalf("%s UserInfo = %+v, want name %q", uid, info, want)
+		}
+		if info.Avatar == nil {
+			t.Fatalf("%s UserInfo has no avatar; it would stop the ghost's avatar from loading", uid)
+		}
+	}
+	if got.MemberMap["me"].UserInfo != nil {
+		t.Fatal("own entry must not carry a ghost profile")
+	}
+}
+
+func TestChatMembersProfileFailureStillListsMembers(t *testing.T) {
+	c, _ := memberClient(map[string][]string{"c1": {"me", "avery"}}, false)
+	c.usersByIDsFn = func([]string) ([]*mattermost.User, error) { return nil, errors.New("boom") }
+	got := c.chatMembers(context.Background(), &mattermost.Channel{ID: "c1", Type: "O"})
+	m, ok := got.MemberMap["avery"]
+	if !ok || m.Membership != event.MembershipJoin {
+		t.Fatalf("member dropped when profiles failed: %+v", got.MemberMap)
+	}
+	if m.UserInfo != nil {
+		t.Fatalf("no profile was fetched, so no name should be pushed: %+v", m.UserInfo)
+	}
+	if !got.IsFull {
+		t.Fatal("a profile failure must not change whether the member list is full")
+	}
+}
+
+func TestUserUpdatedRefreshesGhost(t *testing.T) {
+	p := newProcessEventsHarness(t, lifecycleOptions{probe: activeProbe})
+	got := make(chan *mattermost.User, 1)
+	p.client.refreshGhostFn = func(u *mattermost.User) { got <- u }
+	p.deliver(&mattermost.UserUpdatedEvent{User: &mattermost.User{ID: "avery", FirstName: "Avery", LastName: "Wagar"}})
+	select {
+	case u := <-got:
+		if u.ID != "avery" {
+			t.Fatalf("refreshed %+v", u)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("user_updated did not refresh the ghost")
+	}
+	p.client.mu.RLock()
+	defer p.client.mu.RUnlock()
+	if u := p.client.users["avery"]; u == nil || u.LastName != "Wagar" {
+		t.Fatal("user_updated did not update the cache")
+	}
+}
+
+func TestUserInfoNameHasNoTrailingSpace(t *testing.T) {
+	c := &MattermostClient{}
+	info := c.userInfo(&mattermost.User{ID: "u", Username: "avery", FirstName: "Avery"})
+	if *info.Name != "Avery" {
+		t.Fatalf("name = %q", *info.Name)
+	}
+}
