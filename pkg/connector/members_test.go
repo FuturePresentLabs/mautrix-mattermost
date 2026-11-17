@@ -75,9 +75,15 @@ func TestChatMembers(t *testing.T) {
 	}
 
 	c.UserID = meID
+	c.usersByIDsFn = func(ids []string) ([]*mattermost.User, error) {
+		return []*mattermost.User{{ID: otherID, Username: "gh", FirstName: "GitHub"}}, nil
+	}
 	d := c.chatMembers(ctx, dm)
 	if !d.IsFull || d.OtherUserID != otherID || len(memberIDs(d)) != 2 {
 		t.Fatalf("DM members = %v other=%q full=%v", memberIDs(d), d.OtherUserID, d.IsFull)
+	}
+	if info := d.MemberMap[otherID].UserInfo; info == nil || *info.Name != "GitHub" {
+		t.Fatalf("DM partner carries no current profile: %+v", info)
 	}
 }
 
