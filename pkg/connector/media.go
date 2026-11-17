@@ -130,26 +130,26 @@ func (c *MattermostClient) convertPost(ctx context.Context, intent bridgev2.Matr
 		})
 	}
 
-	// Convert text body.
-	if post.Message != "" {
+	// Convert text body: the message plus any integration attachments.
+	if text := postMarkdown(post); text != "" {
 		if len(parts) > 0 {
 			// Embed caption into the first attachment (Matrix caption convention / MSC2530).
 			firstContent := parts[0].Content
 			firstContent.FileName = firstContent.Body
-			rendered := c.renderPostText(ctx, post.Message)
+			rendered := c.renderPostText(ctx, text)
 			firstContent.Mentions = rendered.Mentions
 			firstContent.Body = rendered.Body
 			if rendered.FormattedBody != "" {
 				firstContent.FormattedBody = rendered.FormattedBody
 				firstContent.Format = rendered.Format
 			}
-			c.attachPermalinkQuotes(ctx, firstContent, post.Message)
+			c.attachPermalinkQuotes(ctx, firstContent, text)
 		} else {
 			// Text-only message.
-			textContent := c.renderPostText(ctx, post.Message)
+			textContent := c.renderPostText(ctx, text)
 			// Quote linked Mattermost posts under the link. Best effort: the
 			// message is sent either way.
-			c.attachPermalinkQuotes(ctx, &textContent, post.Message)
+			c.attachPermalinkQuotes(ctx, &textContent, text)
 			cm := &bridgev2.ConvertedMessage{
 				ReplyTo:    replyTo,
 				ThreadRoot: threadRoot,

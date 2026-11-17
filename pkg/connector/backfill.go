@@ -188,7 +188,7 @@ func (c *MattermostClient) newBackfillMessage(
 			Parts: []*bridgev2.ConvertedMessagePart{{
 				ID:      networkid.PartID(""),
 				Type:    event.EventMessage,
-				Content: &event.MessageEventContent{MsgType: event.MsgText, Body: post.Message},
+				Content: &event.MessageEventContent{MsgType: event.MsgText, Body: postMarkdown(post)},
 			}},
 		}
 	}
