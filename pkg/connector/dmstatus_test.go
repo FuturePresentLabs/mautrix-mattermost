@@ -314,3 +314,16 @@ func TestPolledStatusesUpdateDMTitles(t *testing.T) {
 		t.Fatal("titles updated with DM status off")
 	}
 }
+
+func TestBotDMHasNoStatus(t *testing.T) {
+	c, dm := dmClient("all")
+	c.users[dmOtherID].IsBot = true
+	setStatus(c, "offline")
+	if title, _ := c.dmRoomInfo(dm); *title != "alice" {
+		t.Fatalf("bot title = %q, want no status marker", *title)
+	}
+	var u mattermost.User
+	if err := json.Unmarshal([]byte(`{"id":"b","username":"github","is_bot":true}`), &u); err != nil || !u.IsBot {
+		t.Fatalf("is_bot not decoded: %v %+v", err, u)
+	}
+}

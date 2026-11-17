@@ -119,6 +119,9 @@ func (c *MattermostClient) dmRoomInfo(ch *mattermost.Channel) (title, topic *str
 	if u == nil {
 		return nil, nil
 	}
+	if u.IsBot {
+		status = "" // Mattermost shows bots with a BOT tag, not a status
+	}
 	mode := c.dmStatusMode()
 	var custom *mattermost.CustomStatus
 	if mode != dmStatusOff {
