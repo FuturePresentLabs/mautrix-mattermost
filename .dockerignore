@@ -1,0 +1,7 @@
+.git
+.github
+.worktrees
+*.db
+*.db-*
+*.log
+/tmp
