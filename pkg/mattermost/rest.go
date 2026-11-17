@@ -125,6 +125,43 @@ func GetUser(serverURL, token, userID string) (*User, error) {
 	return &u, nil
 }
 
+// NameDisplaySettings is how the server names users: its default
+// (TeammateNameDisplay) and whether users may override it.
+type NameDisplaySettings struct {
+	Default string
+	Locked  bool
+}
+
+// GetNameDisplaySettings reads the server's name display settings from the
+// client config, which any logged-in user may read.
+func GetNameDisplaySettings(serverURL, token string) (NameDisplaySettings, error) {
+	var cfg map[string]string
+	if err := doGet(serverURL, token, "/api/v4/config/client?format=old", &cfg); err != nil {
+		return NameDisplaySettings{}, err
+	}
+	return NameDisplaySettings{
+		Default: cfg["TeammateNameDisplay"],
+		Locked:  cfg["LockTeammateNameDisplay"] == "true",
+	}, nil
+}
+
+// GetNameFormatPreference returns the logged-in user's own name display
+// preference, or "" when they have not set one.
+func GetNameFormatPreference(serverURL, token string) (string, error) {
+	var pref struct {
+		Value string `json:"value"`
+	}
+	err := doGet(serverURL, token, "/api/v4/users/me/preferences/display_settings/name/name_format", &pref)
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return pref.Value, nil
+}
+
 // GetUsersByIDs fetches the profiles for a list of user IDs in one request.
 // IDs with no matching user are simply absent from the result.
 func GetUsersByIDs(serverURL, token string, userIDs []string) ([]*User, error) {

@@ -58,14 +58,39 @@ type User struct {
 
 // DisplayName returns the most human-readable name available.
 func (u *User) DisplayName() string {
-	switch {
-	case u.Nickname != "":
-		return u.Nickname
-	case u.FirstName != "" || u.LastName != "":
-		return strings.TrimSpace(u.FirstName + " " + u.LastName)
-	default:
-		return u.Username
+	return u.NameFor(NameFormatNicknameFullName)
+}
+
+// Mattermost's name formats, as used by the TeammateNameDisplay setting and
+// the per-user "name_format" display preference.
+const (
+	NameFormatUsername         = "username"
+	NameFormatNicknameFullName = "nickname_full_name"
+	NameFormatFullName         = "full_name"
+)
+
+// FullName is "First Last" without stray spaces; empty when neither is set.
+func (u *User) FullName() string {
+	return strings.TrimSpace(u.FirstName + " " + u.LastName)
+}
+
+// NameFor returns the user's name as Mattermost shows it under the given name
+// format, with Mattermost's fallbacks: a missing nickname falls back to the
+// full name, and a missing full name to the username. Unknown formats are
+// treated as username, Mattermost's default.
+func (u *User) NameFor(format string) string {
+	switch format {
+	case NameFormatNicknameFullName:
+		if u.Nickname != "" {
+			return u.Nickname
+		}
+		fallthrough
+	case NameFormatFullName:
+		if n := u.FullName(); n != "" {
+			return n
+		}
 	}
+	return u.Username
 }
 
 // Channel represents a Mattermost channel.

@@ -162,7 +162,7 @@ func (c *MattermostClient) resolvePermalink(postID string) *quotedPost {
 	var author, channel string
 	if post.UserID != "" {
 		if u, err := mattermost.GetUser(c.serverURL(), c.Token, post.UserID); err == nil && u != nil {
-			author = u.DisplayName()
+			author = c.displayName(u)
 		}
 	}
 	if post.ChannelID != "" {

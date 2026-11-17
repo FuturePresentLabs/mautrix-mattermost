@@ -70,7 +70,7 @@ func (c *MattermostClient) GetChatInfo(ctx context.Context, portal *bridgev2.Por
 				u, hasUser := c.users[otherID]
 				c.mu.RUnlock()
 				if hasUser {
-					n := u.DisplayName()
+					n := c.displayName(u)
 					name = &n
 				}
 			}
@@ -113,7 +113,7 @@ func (c *MattermostClient) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghos
 // syncs and user_updated events all use it, so a ghost's name is always the
 // same function of the Mattermost profile.
 func (c *MattermostClient) userInfo(u *mattermost.User) *bridgev2.UserInfo {
-	name := u.DisplayName()
+	name := c.displayName(u)
 	info := &bridgev2.UserInfo{Name: &name}
 
 	// Profile picture: fetched via the authenticated image endpoint. The ID

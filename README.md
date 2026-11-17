@@ -140,6 +140,23 @@ What it covers, and what it deliberately leaves alone:
   the same rooms. Beeper's hungryserv serves a narrow Matrix subset and drops it, so a
   Beeper-hosted bridge shows no presence and logs no error.
 
+## Names and mentions
+
+`network.display_names` sets how Mattermost people are named in Matrix: their names and
+the text of `@mention` pills. Mentions themselves always go out and are matched by
+username, whatever is displayed.
+
+| Value | Name shown |
+|---|---|
+| `server` (default) | As Mattermost shows them to you: your own *Display → Teammate Name Display* preference, else the server's setting (unless the server locks it) |
+| `username` | `alice` |
+| `full_name` | `Alice Example`; falls back to the username |
+| `nickname` | Nickname, then full name, then username |
+
+The setting is read at connect, and every member's name is refreshed on the startup
+sync, so a change applies to existing names at the next restart. An unknown value
+stops the bridge at startup with an error naming the option.
+
 ## About this fork
 
 This fork tracks upstream and carries the changes below. They are also open as upstream pull requests, so some or all of them may eventually be merged there.
@@ -148,7 +165,9 @@ This fork tracks upstream and carries the changes below. They are also open as u
 |---|---|
 | Native Matrix threading for Mattermost threads | [#8](https://github.com/bostrot/mautrix-mattermost/pull/8) |
 | Channel lifecycle: an archived channel keeps its room, shows Mattermost's own archive/restore message and becomes read-only; a permanently deleted channel removes its room, including one deleted while the bridge was offline | [#9](https://github.com/bostrot/mautrix-mattermost/pull/9) |
-| Reactions are backfilled with the messages they belong to | [#10](https://github.com/bostrot/mautrix-mattermost/pull/10) |
+| Reactions are backfilled with the messages they belong to | [#10](https://github.com/bostrot/mautrix-mattermost/pull/10) (merged) |
+| Linked Mattermost posts are quoted under their permalinks | [#11](https://github.com/bostrot/mautrix-mattermost/pull/11) |
+| @mentions in both directions, full room member lists, current ghost names, configurable display names | not yet opened |
 
 Optional presence publishing (see [Presence](#presence-optional)) is fork-only and has
 no upstream PR yet.
