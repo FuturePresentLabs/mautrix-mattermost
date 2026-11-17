@@ -157,6 +157,27 @@ The setting is read at connect, and every member's name is refreshed on the star
 sync, so a change applies to existing names at the next restart. An unknown value
 stops the bridge at startup with an error naming the option.
 
+## Status on DM titles
+
+`network.dm_status` shows the other person's Mattermost status on a 1:1 DM's title,
+which is visible in the chat list and header. Their custom status emoji follows it, and
+its text becomes the DM's topic. Title changes do not appear in the timeline. Channels and
+group DMs keep their names: one shared title cannot show each member's status.
+
+| Value | Title |
+|---|---|
+| `all` (default) | `alice 🟢` online, `alice 🟡` away, `alice ⛔` do not disturb, `alice ⚪` offline |
+| `dnd` | `alice ⛔` while do not disturb is on, otherwise `alice` |
+| `off` | `alice` |
+
+With a custom status: `alice 🟢 🌴`, topic "On vacation". Server custom emoji (uploaded
+images) cannot appear in a text title and are left out; expired custom statuses are
+cleared.
+
+Statuses come from the same 30-second poll as presence (see below), which runs whenever
+either feature is on. Matrix presence itself is not needed, which matters on Beeper:
+its homeserver drops presence, but titles always show.
+
 ## About this fork
 
 This fork tracks upstream and carries the changes below. They are also open as upstream pull requests, so some or all of them may eventually be merged there.
@@ -168,6 +189,7 @@ This fork tracks upstream and carries the changes below. They are also open as u
 | Reactions are backfilled with the messages they belong to | [#10](https://github.com/bostrot/mautrix-mattermost/pull/10) (merged) |
 | Linked Mattermost posts are quoted under their permalinks | [#11](https://github.com/bostrot/mautrix-mattermost/pull/11) |
 | @mentions in both directions, full room member lists, current ghost names, configurable display names | not yet opened |
+| Status on DM titles (`network.dm_status`) | fork-only for now |
 
 Optional presence publishing (see [Presence](#presence-optional)) is fork-only and has
 no upstream PR yet.

@@ -2,6 +2,7 @@
 package mattermost
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 )
@@ -54,6 +55,47 @@ type User struct {
 	LastName       string `json:"last_name"`
 	Nickname       string `json:"nickname"`
 	ProfilePicture string `json:"-"` // resolved from /api/v4/users/{id}/image
+	// Props holds free-form profile properties, including "customStatus".
+	// Values are decoded as any: a non-string value must not fail the whole
+	// profile.
+	Props map[string]any `json:"props,omitempty"`
+}
+
+// CustomStatus is a user's Mattermost custom status (emoji and text).
+type CustomStatus struct {
+	Emoji     string    `json:"emoji"`
+	Text      string    `json:"text"`
+	Duration  string    `json:"duration"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// defaultCustomStatusEmoji is what Mattermost shows for a custom status that
+// has text but no emoji.
+const defaultCustomStatusEmoji = "speech_balloon"
+
+// ActiveCustomStatus returns the user's custom status, or nil when none is
+// set or it has expired at now. As in Mattermost, a status with an empty
+// duration ("don't clear") never expires, and a status with text but no emoji
+// shows the speech balloon.
+func (u *User) ActiveCustomStatus(now time.Time) *CustomStatus {
+	raw, _ := u.Props["customStatus"].(string)
+	if raw == "" {
+		return nil
+	}
+	var cs CustomStatus
+	if json.Unmarshal([]byte(raw), &cs) != nil {
+		return nil
+	}
+	if cs.Emoji == "" && cs.Text == "" {
+		return nil
+	}
+	if cs.Duration != "" && !cs.ExpiresAt.IsZero() && !now.Before(cs.ExpiresAt) {
+		return nil
+	}
+	if cs.Emoji == "" {
+		cs.Emoji = defaultCustomStatusEmoji
+	}
+	return &cs
 }
 
 // DisplayName returns the most human-readable name available.

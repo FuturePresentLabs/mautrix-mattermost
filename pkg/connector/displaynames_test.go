@@ -221,11 +221,14 @@ func TestExampleConfigsDocumentDisplayNames(t *testing.T) {
 	if file.Network.DisplayNames != displayNamesServer {
 		t.Errorf("example-config.yaml display_names = %q, want server", file.Network.DisplayNames)
 	}
+	if cfg.DMStatus != dmStatusAll || file.Network.DMStatus != dmStatusAll {
+		t.Errorf("dm_status = %q (embedded) / %q (file), want all", cfg.DMStatus, file.Network.DMStatus)
+	}
 }
 
 func TestDisplayNamesSurvivesConfigUpgrade(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("network:\n    display_names: full_name\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("network:\n    display_names: full_name\n    dm_status: dnd\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	example, _, networkUpgrader := (&MattermostConnector{}).GetConfig()
@@ -245,6 +248,9 @@ func TestDisplayNamesSurvivesConfigUpgrade(t *testing.T) {
 	}
 	if err := yaml.Unmarshal(data, &full); err != nil {
 		t.Fatal(err)
+	}
+	if full.Network.DMStatus != "dnd" {
+		t.Fatalf("dm_status lost in upgrade:\n%s", data)
 	}
 	if full.Network.DisplayNames != "full_name" {
 		t.Fatalf("display_names lost in upgrade:\n%s", data)

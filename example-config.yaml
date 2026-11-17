@@ -14,3 +14,10 @@ network:
     #   nickname  - nickname, then First Last, then username
     # Changes apply to existing names at the next bridge restart.
     display_names: server
+    # The other person's Mattermost status on 1:1 DM titles, with their custom
+    # status emoji after it and its text as the DM's topic. Title changes do not
+    # appear in the timeline. Channels and group DMs are not changed.
+    #   all  - every state: alice 🟢 (online), 🟡 (away), ⛔ (do not disturb), ⚪ (offline)
+    #   dnd  - only do not disturb: alice ⛔
+    #   off  - plain names
+    dm_status: all

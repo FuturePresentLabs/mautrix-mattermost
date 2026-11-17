@@ -52,6 +52,11 @@ type MattermostClient struct {
 	// Guarded by mu.
 	nameFormat string
 	// displayNamesFn overrides network.display_names in tests.
+	// dmStatus remembers the DM titles last queued (see dmstatus.go).
+	dmStatus dmStatusState
+	// dmStatusFn and nowFn override network.dm_status and the clock in tests.
+	dmStatusFn     func() string
+	nowFn          func() time.Time
 	displayNamesFn func() string
 	// channelMembersFn overrides the channel member fetch in tests.
 	channelMembersFn func(channelID string) ([]*mattermost.ChannelMember, error)
@@ -169,18 +174,6 @@ func (c *MattermostClient) channelResyncEvent(ch *mattermost.Channel) *simpleven
 		name = &n
 	}
 
-	// For DMs, name the room after the other participant.
-	if ch.IsDM() && name == nil {
-		if otherID := dmOtherUserID(ch.Name, c.UserID); otherID != "" {
-			c.mu.RLock()
-			if u, ok := c.users[otherID]; ok {
-				n := c.displayName(u)
-				name = &n
-			}
-			c.mu.RUnlock()
-		}
-	}
-
 	return &simplevent.ChatResync{
 		EventMeta: simplevent.EventMeta{
 			Type:         bridgev2.RemoteEventChatResync,
@@ -191,12 +184,19 @@ func (c *MattermostClient) channelResyncEvent(ch *mattermost.Channel) *simpleven
 		// Members are fetched when the portal handles the event, not here, so
 		// the websocket loop never waits on the members request.
 		GetChatInfoFunc: func(ctx context.Context, _ *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
-			return &bridgev2.ChatInfo{
+			info := &bridgev2.ChatInfo{
 				Name:        name,
 				Type:        &roomType,
-				Members:     c.chatMembers(ctx, ch),
+				Members:     c.chatMembers(ctx, ch), // caches the DM partner's profile
 				CanBackfill: true,
-			}, nil
+			}
+			// A DM is titled after the other person, with their status.
+			if title, topic := c.dmRoomInfo(ch); title != nil {
+				info.Name, info.Topic = title, topic
+				info.ExcludeChangesFromTimeline = true
+				c.noteDMRoomInfo(ch.ID, title, topic)
+			}
+			return info, nil
 		},
 		CheckNeedsBackfillFunc: func(_ context.Context, _ *database.Message) (bool, error) { return true, nil },
 	}
