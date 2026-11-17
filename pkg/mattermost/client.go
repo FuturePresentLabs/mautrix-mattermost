@@ -252,6 +252,16 @@ func (c *Client) parseEvent(raw []byte) {
 			c.Events <- &UserUpdatedEvent{User: u}
 		}
 
+	case "multiple_channels_viewed":
+		if evt := channelsViewedEvent(env.Data); evt != nil {
+			c.Events <- evt
+		}
+
+	case "channel_viewed": // servers before multiple_channels_viewed
+		if id := strFromData(env.Data, "channel_id"); id != "" {
+			c.Events <- &ChannelsViewedEvent{Times: map[string]int64{id: 0}}
+		}
+
 	case "system_console_noti": // ignore console notifications
 
 	default:
@@ -276,6 +286,22 @@ func channelMemberEvent(env WSEvent) *ChannelMemberEvent {
 		return nil
 	}
 	return &ChannelMemberEvent{ChannelID: channelID, UserID: userID, Added: env.Event == "user_added"}
+}
+
+// channelsViewedEvent decodes "multiple_channels_viewed": channel_times maps
+// channel IDs to the time (ms) they were viewed.
+func channelsViewedEvent(data map[string]interface{}) *ChannelsViewedEvent {
+	raw, _ := data["channel_times"].(map[string]interface{})
+	times := make(map[string]int64, len(raw))
+	for id, v := range raw {
+		if ms, ok := v.(float64); ok && id != "" {
+			times[id] = int64(ms)
+		}
+	}
+	if len(times) == 0 {
+		return nil
+	}
+	return &ChannelsViewedEvent{Times: times}
 }
 
 // --- helpers ---
