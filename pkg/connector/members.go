@@ -45,7 +45,11 @@ func (c *MattermostClient) chatMembers(ctx context.Context, ch *mattermost.Chann
 	if ch.IsDM() {
 		if otherID := dmOtherUserID(ch.Name, c.UserID); otherID != "" {
 			list.OtherUserID = networkid.UserID(otherID)
-			memberMap[networkid.UserID(otherID)] = joinedMember(otherID)
+			member := joinedMember(otherID)
+			if u := c.memberProfiles(ctx, []string{otherID})[otherID]; u != nil {
+				member.UserInfo = c.userInfo(u)
+			}
+			memberMap[networkid.UserID(otherID)] = member
 		}
 		list.IsFull = true
 		return list
