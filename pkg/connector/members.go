@@ -225,6 +225,8 @@ func (c *MattermostClient) handleUserUpdated(u *mattermost.User) {
 		ctx = c.UserLogin.Log.WithContext(ctx)
 	}
 	go c.refreshGhost(ctx, u)
+	// A changed custom status (or name) shows on their DM title right away.
+	go c.refreshDMStatuses()
 }
 
 // memberChange is the ChatInfoChange for one live join or leave. It is shown

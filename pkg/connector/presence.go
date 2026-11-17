@@ -110,7 +110,9 @@ func publishPresence(ctx context.Context, set presenceSetter, resolve ghostResol
 // Mattermost. It runs only when presence is enabled: a disabled bridge must not spend
 // requests finding out.
 func (c *MattermostClient) startPresencePoller(done <-chan struct{}) {
-	if _, ok := c.presenceSetter(); !ok {
+	// The poller feeds both presence publishing and DM status titles; it runs
+	// when either needs it.
+	if publish, titles := c.statusConsumers(); !publish && !titles {
 		lg := c.lifecycleLogger()
 		conn, isConnector := c.UserLogin.Bridge.Network.(*MattermostConnector)
 		mx, isMatrixConnector := c.UserLogin.Bridge.Matrix.(*matrix.Connector)
@@ -120,7 +122,7 @@ func (c *MattermostClient) startPresencePoller(done <-chan struct{}) {
 			Bool("enabled", isConnector && conn.Config != nil && conn.Config.Presence.Enabled).
 			Bool("matrix_is_connector", isMatrixConnector).
 			Bool("appservice_present", isMatrixConnector && mx.AS != nil).
-			Msg("Presence publishing is off")
+			Msg("Presence publishing and DM status are off; not polling statuses")
 		return
 	}
 	lg := c.lifecycleLogger()
@@ -159,7 +161,8 @@ func (c *MattermostClient) startPresencePoller(done <-chan struct{}) {
 // that changed. A read failure publishes nothing: a partial answer is not evidence
 // that anyone went offline.
 func (c *MattermostClient) pollPresence() {
-	if _, ok := c.presenceSetter(); !ok {
+	publish, titles := c.statusConsumers()
+	if !publish && !titles {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), presenceTimeout)
@@ -183,18 +186,39 @@ func (c *MattermostClient) pollPresence() {
 			statuses[userID] = status
 		}
 	}
-	c.mu.Lock()
-	previous := c.presenceSeen
-	c.presenceSeen = statuses
-	c.mu.Unlock()
-	for _, update := range presenceDiff(previous, statuses) {
-		c.publishPresence(update)
-	}
+	previous := c.applyPolledStatuses(statuses, publish, titles)
 	lg := c.lifecycleLogger()
 	lg.Debug().
 		Int("candidates", len(ids)).
 		Int("changes", len(presenceDiff(previous, statuses))).
 		Msg("Polled Mattermost statuses")
+}
+
+// statusConsumers reports who needs Mattermost statuses: presence publishing
+// (network.presence) and DM status titles (network.dm_status).
+func (c *MattermostClient) statusConsumers() (publish, titles bool) {
+	_, publish = c.presenceSetter()
+	return publish, c.dmStatusMode() != dmStatusOff
+}
+
+// applyPolledStatuses stores a poll's statuses and hands them to the consumers
+// that are on. It returns the previous statuses.
+func (c *MattermostClient) applyPolledStatuses(statuses map[string]string, publish, titles bool) map[string]string {
+	c.mu.Lock()
+	previous := c.presenceSeen
+	c.presenceSeen = statuses
+	c.mu.Unlock()
+	if publish {
+		for _, update := range presenceDiff(previous, statuses) {
+			c.publishPresence(update)
+		}
+	}
+	if titles {
+		// Every poll, not only on status changes: this also clears custom
+		// statuses that expired and repairs titles missed while disconnected.
+		c.refreshDMStatuses()
+	}
+	return previous
 }
 
 // presenceGhostQuery lists the Mattermost users the bridge has a ghost for. Only

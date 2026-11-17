@@ -61,27 +61,20 @@ func (c *MattermostClient) GetChatInfo(ctx context.Context, portal *bridgev2.Por
 		members = c.chatMembers(ctx, nil)
 	}
 
-	if ok && ch.IsDM() {
-		otherID := dmOtherUserID(ch.Name, c.UserID)
-		if otherID != "" {
-			// Use the other user's display name if the channel has no explicit display name.
-			if name == nil || *name == chID {
-				c.mu.RLock()
-				u, hasUser := c.users[otherID]
-				c.mu.RUnlock()
-				if hasUser {
-					n := c.displayName(u)
-					name = &n
-				}
-			}
-		}
-	}
-
-	return &bridgev2.ChatInfo{
+	info := &bridgev2.ChatInfo{
 		Name:    name,
 		Type:    &roomType,
 		Members: members,
-	}, nil
+	}
+	// A DM is titled after the other person, with their status (dmstatus.go).
+	if ok {
+		if title, topic := c.dmRoomInfo(ch); title != nil {
+			info.Name, info.Topic = title, topic
+			info.ExcludeChangesFromTimeline = true
+			c.noteDMRoomInfo(ch.ID, title, topic)
+		}
+	}
+	return info, nil
 }
 
 // GetUserInfo returns Matrix ghost metadata for a Mattermost user.

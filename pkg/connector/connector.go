@@ -34,6 +34,9 @@ func (m *MattermostConnector) Start(ctx context.Context) error {
 		if _, err := parseDisplayNames(m.Config.DisplayNames); err != nil {
 			return fmt.Errorf("network.display_names: %w", err)
 		}
+		if _, err := parseDMStatus(m.Config.DMStatus); err != nil {
+			return fmt.Errorf("network.dm_status: %w", err)
+		}
 	}
 	return nil
 }
@@ -76,6 +79,7 @@ func (m *MattermostConnector) GetConfig() (string, any, configupgrade.Upgrader) 
 func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Bool, "presence", "enabled")
 	helper.Copy(configupgrade.Str, "display_names")
+	helper.Copy(configupgrade.Str, "dm_status")
 }
 
 func (m *MattermostConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
@@ -496,6 +500,9 @@ type Config struct {
 	// DisplayNames picks how Mattermost users are named in Matrix (see
 	// displaynames.go). Empty means "server".
 	DisplayNames string `yaml:"display_names"`
+	// DMStatus picks how the other person's status shows on 1:1 DM titles
+	// (see dmstatus.go). Empty means "all".
+	DMStatus string `yaml:"dm_status"`
 }
 
 const ExampleConfig = `# Mattermost Bridge Configuration
@@ -515,4 +522,12 @@ presence:
 #   nickname  - nickname, then First Last, then username
 # Changes apply to existing names at the next bridge restart.
 display_names: server
+
+# The other person's Mattermost status on 1:1 DM titles, with their custom
+# status emoji after it and its text as the DM's topic. Title changes do not
+# appear in the timeline. Channels and group DMs are not changed.
+#   all  - every state: alice 🟢 (online), 🟡 (away), ⛔ (do not disturb), ⚪ (offline)
+#   dnd  - only do not disturb: alice ⛔
+#   off  - plain names
+dm_status: all
 `
