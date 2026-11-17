@@ -411,6 +411,20 @@ func doGet(serverURL, token, path string, out any) error {
 	return nil
 }
 
+// GetTeam fetches one team.
+func GetTeam(serverURL, token, teamID string) (*Team, error) {
+	var t Team
+	if err := doGet(serverURL, token, "/api/v4/teams/"+teamID, &t); err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+// TeamImageURL is the team icon endpoint (authenticated).
+func TeamImageURL(serverURL, teamID string) string {
+	return normalizeURL(serverURL) + "/api/v4/teams/" + teamID + "/image"
+}
+
 // ViewChannel marks a channel read for the token's user, as opening it in
 // Mattermost does (POST /channels/members/me/view).
 func ViewChannel(serverURL, token, channelID string) error {

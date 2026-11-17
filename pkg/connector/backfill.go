@@ -42,6 +42,9 @@ func (c *MattermostClient) FetchMessages(ctx context.Context, params bridgev2.Fe
 // fetchChannelMessages backfills the portal timeline. Replies are included in
 // the batch alongside their roots, exactly like the original channel backfill.
 func (c *MattermostClient) fetchChannelMessages(ctx context.Context, params bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
+	if isTeamPortal(params.Portal.ID) {
+		return &bridgev2.FetchMessagesResponse{}, nil // spaces have no timeline
+	}
 	channelID := string(params.Portal.ID)
 
 	pageSize := params.Count

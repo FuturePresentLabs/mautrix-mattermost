@@ -105,6 +105,9 @@ type MattermostClient struct {
 	previewMu sync.Mutex
 	previews  map[string]cachedPreview
 
+	// getTeamFn overrides the team fetch in tests (teams.go).
+	getTeamFn func(teamID string) (*mattermost.Team, error)
+
 	// viewedAt is how far each channel is known read (see readsync.go).
 	// Guarded by mu.
 	viewedAt map[string]time.Time
@@ -198,6 +201,7 @@ func (c *MattermostClient) channelResyncEvent(ch *mattermost.Channel) *simpleven
 				Type:        &roomType,
 				Members:     c.chatMembers(ctx, ch), // caches the DM partner's profile
 				CanBackfill: true,
+				ParentID:    channelParent(ch), // the team's space (teams.go)
 			}
 			// A DM is titled after the other person, with their status.
 			if title, topic := c.dmRoomInfo(ch); title != nil {
@@ -515,6 +519,9 @@ func (c *MattermostClient) processEvents() {
 			}
 			c.handleUserUpdated(evt.User)
 
+		case *mattermost.TeamUpdatedEvent:
+			c.queueTeamResync(evt.Team)
+
 		case *mattermost.ChannelsViewedEvent:
 			c.handleChannelsViewed(evt)
 
@@ -555,6 +562,11 @@ func (c *MattermostClient) syncChannels() {
 
 	seenChannels := make(map[string]bool)
 	listingComplete := true
+
+	// Spaces first, so channels have their parent space when they sync.
+	for _, team := range teams {
+		c.queueTeamResync(team)
+	}
 
 	for _, team := range teams {
 		channels, err := mattermost.GetChannelsForUser(c.serverURL(), c.Token, c.UserID, team.ID)

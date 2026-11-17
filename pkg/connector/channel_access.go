@@ -101,7 +101,8 @@ func unlistedPortalIDs(portals []*database.Portal, receiver networkid.UserLoginI
 		if p == nil || p.MXID == "" || p.Receiver != receiver {
 			continue
 		}
-		if id := string(p.ID); id != "" && !listed[id] {
+		// Team spaces are not channels; they must never be probed or deleted.
+		if id := string(p.ID); id != "" && !listed[id] && !isTeamPortal(p.ID) {
 			out = append(out, id)
 		}
 	}

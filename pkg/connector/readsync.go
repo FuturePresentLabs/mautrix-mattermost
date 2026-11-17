@@ -31,7 +31,7 @@ var _ bridgev2.ReadReceiptHandlingNetworkAPI = (*MattermostClient)(nil)
 
 // HandleMatrixReadReceipt marks the channel or thread read in Mattermost.
 func (c *MattermostClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridgev2.MatrixReadReceipt) error {
-	if msg.Implicit || msg.Portal == nil {
+	if msg.Implicit || msg.Portal == nil || isTeamPortal(msg.Portal.ID) {
 		// Implicit receipts come from the user sending a message, which
 		// Mattermost already treats as reading the channel.
 		return nil
