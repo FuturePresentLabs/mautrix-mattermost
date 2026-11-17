@@ -59,6 +59,8 @@ type User struct {
 	// Values are decoded as any: a non-string value must not fail the whole
 	// profile.
 	Props map[string]any `json:"props,omitempty"`
+	// IsBot marks bot accounts, which Mattermost shows without a status.
+	IsBot bool `json:"is_bot,omitempty"`
 }
 
 // CustomStatus is a user's Mattermost custom status (emoji and text).
