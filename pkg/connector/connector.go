@@ -12,7 +12,6 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
-	"maunium.net/go/mautrix/bridgev2/networkid"
 
 	"github.com/bostrot/mautrix-mattermost/pkg/mattermost"
 )
@@ -27,6 +26,7 @@ var _ bridgev2.NetworkConnector = (*MattermostConnector)(nil)
 
 func (m *MattermostConnector) Init(bridge *bridgev2.Bridge) {
 	m.Bridge = bridge
+	registerCommands(bridge)
 }
 
 func (m *MattermostConnector) Start(ctx context.Context) error {
@@ -85,13 +85,7 @@ func upgradeConfig(helper configupgrade.Helper) {
 
 func (m *MattermostConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
 	meta := login.Metadata.(*UserLoginMetadata)
-	login.Client = &MattermostClient{
-		UserLogin: login,
-		Username:  meta.Username,
-		Token:     meta.Token,
-		ServerURL: meta.ServerURL,
-		UserID:    meta.UserID,
-	}
+	login.Client = newMattermostClient(login, meta)
 	return nil
 }
 
@@ -145,6 +139,16 @@ type UserLoginMetadata struct {
 	Username  string `json:"username"`
 	Token     string `json:"token"`
 	ServerURL string `json:"server_url"`
+	// TeamID is the team this login bridges (teamlogin.go); empty for a
+	// login made before teams were per login, until it is pinned.
+	TeamID string `json:"team_id,omitempty"`
+	// TeamName is the team as shown to the user.
+	TeamName string `json:"team_name,omitempty"`
+	// DMs marks the one login of the account that bridges DMs and group DMs.
+	DMs bool `json:"dms,omitempty"`
+	// TeamIcon is the team icon last set as the login's avatar
+	// ("<team id>_<last_team_icon_update>"), so it is uploaded once.
+	TeamIcon string `json:"team_icon,omitempty"`
 }
 
 // --- PAT Login ---
@@ -152,6 +156,7 @@ type UserLoginMetadata struct {
 // PATLoginProcess handles Personal Access Token-based login.
 type PATLoginProcess struct {
 	User *bridgev2.User
+	team teamStep
 }
 
 var _ bridgev2.LoginProcessUserInput = (*PATLoginProcess)(nil)
@@ -179,6 +184,9 @@ func (p *PATLoginProcess) Start(ctx context.Context) (*bridgev2.LoginStep, error
 }
 
 func (p *PATLoginProcess) SubmitUserInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
+	if p.team.pending() {
+		return p.team.submit(ctx, p.User, input)
+	}
 	serverURL := input["server_url"]
 	token := input["token"]
 	if serverURL == "" || token == "" {
@@ -191,41 +199,7 @@ func (p *PATLoginProcess) SubmitUserInput(ctx context.Context, input map[string]
 		return nil, fmt.Errorf("failed to verify token: %w", err)
 	}
 
-	ul, err := p.User.NewLogin(ctx, &database.UserLogin{
-		ID:         networkid.UserLoginID(userID),
-		RemoteName: username,
-		Metadata: &UserLoginMetadata{
-			UserID:    userID,
-			Username:  username,
-			Token:     token,
-			ServerURL: serverURL,
-		},
-	}, &bridgev2.NewLoginParams{
-		LoadUserLogin: func(ctx context.Context, login *bridgev2.UserLogin) error {
-			login.Client = &MattermostClient{
-				UserLogin: login,
-				Username:  username,
-				Token:     token,
-				ServerURL: serverURL,
-				UserID:    userID,
-			}
-			return nil
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create login: %w", err)
-	}
-	ul.Client.Connect(ul.Log.WithContext(ctx))
-
-	return &bridgev2.LoginStep{
-		Type:         bridgev2.LoginStepTypeComplete,
-		StepID:       "com.bostrot.mattermost.complete",
-		Instructions: fmt.Sprintf("Successfully logged in as %s", username),
-		CompleteParams: &bridgev2.LoginCompleteParams{
-			UserLoginID: ul.ID,
-			UserLogin:   ul,
-		},
-	}, nil
+	return p.team.begin(ctx, p.User, serverURL, token, userID, username)
 }
 
 func (p *PATLoginProcess) Cancel() {}
@@ -235,6 +209,7 @@ func (p *PATLoginProcess) Cancel() {}
 // PasswordLoginProcess handles email + password login.
 type PasswordLoginProcess struct {
 	User *bridgev2.User
+	team teamStep
 }
 
 var _ bridgev2.LoginProcessUserInput = (*PasswordLoginProcess)(nil)
@@ -267,6 +242,9 @@ func (p *PasswordLoginProcess) Start(ctx context.Context) (*bridgev2.LoginStep, 
 }
 
 func (p *PasswordLoginProcess) SubmitUserInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
+	if p.team.pending() {
+		return p.team.submit(ctx, p.User, input)
+	}
 	serverURL := input["server_url"]
 	email := input["email"]
 	password := input["password"]
@@ -284,41 +262,7 @@ func (p *PasswordLoginProcess) SubmitUserInput(ctx context.Context, input map[st
 		return nil, fmt.Errorf("failed to fetch user info: %w", err)
 	}
 
-	ul, err := p.User.NewLogin(ctx, &database.UserLogin{
-		ID:         networkid.UserLoginID(userID),
-		RemoteName: username,
-		Metadata: &UserLoginMetadata{
-			UserID:    userID,
-			Username:  username,
-			Token:     token,
-			ServerURL: serverURL,
-		},
-	}, &bridgev2.NewLoginParams{
-		LoadUserLogin: func(ctx context.Context, login *bridgev2.UserLogin) error {
-			login.Client = &MattermostClient{
-				UserLogin: login,
-				Username:  username,
-				Token:     token,
-				ServerURL: serverURL,
-				UserID:    userID,
-			}
-			return nil
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create login: %w", err)
-	}
-	ul.Client.Connect(ul.Log.WithContext(ctx))
-
-	return &bridgev2.LoginStep{
-		Type:         bridgev2.LoginStepTypeComplete,
-		StepID:       "com.bostrot.mattermost.complete",
-		Instructions: fmt.Sprintf("Successfully logged in as %s", username),
-		CompleteParams: &bridgev2.LoginCompleteParams{
-			UserLoginID: ul.ID,
-			UserLogin:   ul,
-		},
-	}, nil
+	return p.team.begin(ctx, p.User, serverURL, token, userID, username)
 }
 
 func (p *PasswordLoginProcess) Cancel() {}
@@ -331,6 +275,7 @@ func (p *PasswordLoginProcess) Cancel() {}
 // requests and is not needed here.
 type CookieLoginProcess struct {
 	User *bridgev2.User
+	team teamStep
 }
 
 var _ bridgev2.LoginProcessUserInput = (*CookieLoginProcess)(nil)
@@ -359,6 +304,9 @@ func (p *CookieLoginProcess) Start(ctx context.Context) (*bridgev2.LoginStep, er
 }
 
 func (p *CookieLoginProcess) SubmitUserInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
+	if p.team.pending() {
+		return p.team.submit(ctx, p.User, input)
+	}
 	serverURL := input["server_url"]
 	token := input["token"]
 	if serverURL == "" || token == "" {
@@ -371,41 +319,7 @@ func (p *CookieLoginProcess) SubmitUserInput(ctx context.Context, input map[stri
 		return nil, fmt.Errorf("failed to verify cookie token: %w", err)
 	}
 
-	ul, err := p.User.NewLogin(ctx, &database.UserLogin{
-		ID:         networkid.UserLoginID(userID),
-		RemoteName: username,
-		Metadata: &UserLoginMetadata{
-			UserID:    userID,
-			Username:  username,
-			Token:     token,
-			ServerURL: serverURL,
-		},
-	}, &bridgev2.NewLoginParams{
-		LoadUserLogin: func(ctx context.Context, login *bridgev2.UserLogin) error {
-			login.Client = &MattermostClient{
-				UserLogin: login,
-				Username:  username,
-				Token:     token,
-				ServerURL: serverURL,
-				UserID:    userID,
-			}
-			return nil
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create login: %w", err)
-	}
-	ul.Client.Connect(ul.Log.WithContext(ctx))
-
-	return &bridgev2.LoginStep{
-		Type:         bridgev2.LoginStepTypeComplete,
-		StepID:       "com.bostrot.mattermost.complete",
-		Instructions: fmt.Sprintf("Successfully logged in as %s", username),
-		CompleteParams: &bridgev2.LoginCompleteParams{
-			UserLoginID: ul.ID,
-			UserLogin:   ul,
-		},
-	}, nil
+	return p.team.begin(ctx, p.User, serverURL, token, userID, username)
 }
 
 func (p *CookieLoginProcess) Cancel() {}
@@ -451,6 +365,9 @@ func (p *WebviewLoginProcess) Start(ctx context.Context) (*bridgev2.LoginStep, e
 }
 
 func (p *WebviewLoginProcess) SubmitUserInput(ctx context.Context, input map[string]string) (*bridgev2.LoginStep, error) {
+	if p.team.pending() {
+		return p.team.submit(ctx, p.User, input)
+	}
 	step, serverURL, err := webviewCookieStep(input["server_url"])
 	if err != nil {
 		return nil, err

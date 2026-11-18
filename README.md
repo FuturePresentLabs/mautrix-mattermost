@@ -189,14 +189,26 @@ Statuses come from the same 30-second poll as presence (see below), which runs w
 either feature is on. Matrix presence itself is not needed, which matters on Beeper:
 its homeserver drops presence, but titles always show.
 
-## Spaces and read sync
+## One login per team
 
-With `network.team_spaces: true`, each Mattermost team is a Matrix space, named and
-pictured like the team (its icon follows changes in Mattermost). It is off by default:
-Beeper's per-account inbox filters, such as showing only DMs, do not apply to rooms
-inside these spaces. Turning it off moves the channels back out and removes the spaces. The team's channels are in its space, so channels with
-the same name in two teams, such as Town Square, are told apart by their space. DMs and
-group DMs belong to no team and stay outside the team spaces.
+Each Mattermost team is a separate login, so clients that group and filter by account
+(such as Beeper's inbox toggles) treat each team as its own account. The login is named
+after the team and uses the team icon. Log in once per team with the same credentials;
+when you belong to more than one team, the login asks which team to bridge.
+
+DMs and group DMs belong to no team, so exactly one of your logins carries them: your
+first login, unless you choose another with `dm-team <team>` in the bridge's management
+room (`dm-team` alone lists your logins). Moving them recreates the DM rooms under the
+new login, with history re-imported.
+
+A login made before logins had teams is pinned on its next connect to your first team
+by name, and keeps the DMs. Its rooms for other teams' channels are removed; add a login
+for each other team to bridge them again.
+
+`network.team_spaces: true` additionally puts a login's channels in a space for the team.
+It is off by default: Beeper's inbox filters do not apply to rooms inside these spaces.
+
+## Read sync
 
 Reading is synced both ways. Reading a room or thread in Matrix marks it read in
 Mattermost, and viewing a channel in Mattermost marks it read in Matrix. Mattermost can
