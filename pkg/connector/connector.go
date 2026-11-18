@@ -81,6 +81,8 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Str, "display_names")
 	helper.Copy(configupgrade.Str, "dm_status")
 	helper.Copy(configupgrade.Bool, "team_spaces")
+	helper.Copy(configupgrade.Bool, "team_logins")
+	helper.Copy(configupgrade.Bool, "mute_channels_on_create")
 }
 
 func (m *MattermostConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
@@ -152,6 +154,9 @@ type UserLoginMetadata struct {
 	// MutesSynced is set once the rooms that existed before mutes were
 	// bridged have been muted where their channel is (mutes.go).
 	MutesSynced bool `json:"mutes_synced,omitempty"`
+	// EnabledTeams is the teams an account login (no TeamID) bridges, keyed
+	// by team ID (teamtoggle.go). Teams start switched off.
+	EnabledTeams map[string]bool `json:"enabled_teams,omitempty"`
 }
 
 // --- PAT Login ---
@@ -425,8 +430,15 @@ type Config struct {
 	// (see dmstatus.go). Empty means "all".
 	DMStatus string `yaml:"dm_status"`
 	// TeamSpaces puts each team's channels in a Matrix space for the team
-	// (see teams.go). Off by default.
+	// (see teams.go).
 	TeamSpaces bool `yaml:"team_spaces"`
+	// TeamLogins makes each team a separate login (teamlogin.go). Off: one
+	// login per account, with each team switched on or off by the team
+	// command (teamtoggle.go).
+	TeamLogins bool `yaml:"team_logins"`
+	// MuteChannelsOnCreate mutes a team channel's room when it is created,
+	// so channels stay quiet and DMs notify.
+	MuteChannelsOnCreate bool `yaml:"mute_channels_on_create"`
 }
 
 const ExampleConfig = `# Mattermost Bridge Configuration
@@ -456,8 +468,17 @@ display_names: server
 dm_status: all
 
 # Put each Mattermost team's channels in a Matrix space named and pictured like
-# the team. Off by default: Beeper's per-account inbox filters (such as showing
-# only DMs) do not apply to rooms inside these spaces. Turning it off moves the
-# channels back out and removes the team spaces.
-team_spaces: false
+# the team. Turning it off moves the channels back out and removes the spaces.
+team_spaces: true
+
+# One login per Mattermost team instead of one login for the whole account.
+# Off (the default): one login carries your DMs and the teams you switch on
+# with the "team" bot command; teams start switched off. On: log in once per
+# team; one of the logins carries the DMs (see the "dm-team" command).
+team_logins: false
+
+# Mute a team channel's room when it is created, so channels stay quiet while
+# DMs notify. Unmute any room you want to hear from. Mutes you set in
+# Mattermost are copied either way.
+mute_channels_on_create: true
 `

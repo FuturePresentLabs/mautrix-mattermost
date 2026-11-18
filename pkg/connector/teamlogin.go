@@ -34,6 +34,20 @@ type teamStep struct {
 	pendingLogin *verifiedLogin
 	// finishFn replaces finishTeamLogin in tests.
 	finishFn func(v *verifiedLogin, team *mattermost.Team) (*bridgev2.LoginStep, error)
+	// perTeamFn overrides network.team_logins in tests.
+	perTeamFn func() bool
+}
+
+// perTeam reports network.team_logins. Without a bridge config (tests that
+// build bare steps) it is on, as before logins could cover the account.
+func (s *teamStep) perTeam(user *bridgev2.User) bool {
+	if s.perTeamFn != nil {
+		return s.perTeamFn()
+	}
+	if cfg := bridgeConfig(userBridge(user)); cfg != nil {
+		return cfg.TeamLogins
+	}
+	return true
 }
 
 func (s *teamStep) finish(ctx context.Context, user *bridgev2.User, v *verifiedLogin, team *mattermost.Team) (*bridgev2.LoginStep, error) {
@@ -63,6 +77,9 @@ func (s *teamStep) begin(ctx context.Context, user *bridgev2.User, serverURL, to
 		return nil, fmt.Errorf("%s is not a member of any team", username)
 	}
 	v := &verifiedLogin{serverURL: serverURL, token: token, userID: userID, username: username, teams: teams}
+	if !s.perTeam(user) {
+		return s.finish(ctx, user, v, nil) // one login for the account
+	}
 	if len(teams) == 1 {
 		return s.finish(ctx, user, v, teams[0])
 	}
@@ -187,19 +204,28 @@ func dmOwnerFor(existing []*bridgev2.UserLogin, self networkid.UserLoginID, serv
 	return true
 }
 
-// finishTeamLogin creates or updates the login for the team.
+// finishTeamLogin creates or updates the login for the team, or with team nil
+// the login for the whole account (teamtoggle.go).
 func finishTeamLogin(ctx context.Context, user *bridgev2.User, v *verifiedLogin, team *mattermost.Team) (*bridgev2.LoginStep, error) {
 	existing := user.GetUserLogins()
-	id := teamLoginID(existing, v.serverURL, v.userID, team.ID)
-	label := teamLabel(team, v.teams)
-	meta := &UserLoginMetadata{
-		UserID:    v.userID,
-		Username:  v.username,
-		Token:     v.token,
-		ServerURL: v.serverURL,
-		TeamID:    team.ID,
-		TeamName:  label,
-		DMs:       dmOwnerFor(existing, id, v.serverURL, v.userID),
+	var meta *UserLoginMetadata
+	var id networkid.UserLoginID
+	var label string
+	if team == nil {
+		id, meta = accountLogin(existing, v)
+		label = meta.Username
+	} else {
+		id = teamLoginID(existing, v.serverURL, v.userID, team.ID)
+		label = teamLabel(team, v.teams)
+		meta = &UserLoginMetadata{
+			UserID:    v.userID,
+			Username:  v.username,
+			Token:     v.token,
+			ServerURL: v.serverURL,
+			TeamID:    team.ID,
+			TeamName:  label,
+			DMs:       dmOwnerFor(existing, id, v.serverURL, v.userID),
+		}
 	}
 	ul, err := user.NewLogin(ctx, &database.UserLogin{
 		ID:            id,
@@ -272,8 +298,24 @@ func (c *MattermostClient) ownsChannel(ch *mattermost.Channel) bool {
 	if ch.IsDM() || ch.IsGroupDM() {
 		return c.ownsDMs()
 	}
-	scope := c.teamScope()
-	return scope == "" || ch.TeamID == scope
+	return c.ownsTeam(ch.TeamID)
+}
+
+// ownsTeam reports whether this login bridges a team's channels: its own
+// team, or for an account login a team switched on. A bare test client (no
+// metadata) bridges every team.
+func (c *MattermostClient) ownsTeam(teamID string) bool {
+	meta := c.loginMeta()
+	if meta == nil {
+		return true
+	}
+	if meta.TeamID != "" {
+		return teamID == meta.TeamID
+	}
+	if !c.accountLogins() {
+		return true // a legacy login waiting to be pinned
+	}
+	return teamID != "" && meta.EnabledTeams[teamID]
 }
 
 // ownsPostedChannel decides from a posted event's own metadata, without a
@@ -282,8 +324,7 @@ func (c *MattermostClient) ownsPostedChannel(channelType, teamID string) bool {
 	if channelType == "D" || channelType == "G" {
 		return c.ownsDMs()
 	}
-	scope := c.teamScope()
-	return scope == "" || teamID == scope
+	return c.ownsTeam(teamID)
 }
 
 // teamForLegacyLogin is the team a not-yet-pinned login is pinned to: the

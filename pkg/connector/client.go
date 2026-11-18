@@ -136,6 +136,12 @@ type MattermostClient struct {
 	// Test hooks for mutes.
 	membershipsFn func(teamID string) ([]*mattermost.ChannelMember, error)
 	muteRoomFn    func(channelID string, until time.Time) bool
+	// Test hooks for account logins (teamtoggle.go).
+	accountLoginsFn func() bool
+	listTeamsFn     func() ([]*mattermost.Team, error)
+	resyncFn        func()
+	afterDelayFn    func(time.Duration, func())
+	muteChannelsFn  func() bool
 	// fetchPreviewImageFn overrides downloading link preview images.
 	fetchPreviewImageFn func(src string) ([]byte, string, error)
 	// clearSpaceParentsFn overrides unlinking rooms from a team space.
@@ -606,7 +612,7 @@ func (c *MattermostClient) syncChannels() {
 	c.syncLoginProfile(teams)
 
 	// Spaces first, so channels have their parent space when they sync.
-	c.syncTeams(c.ownTeams(teams))
+	c.syncTeams(teams)
 
 	for _, team := range teams {
 		channels, err := mattermost.GetChannelsForUser(c.serverURL(), c.Token, c.UserID, team.ID)
