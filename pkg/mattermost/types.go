@@ -86,6 +86,49 @@ func (p *Post) Timestamp() time.Time {
 type PostMetadata struct {
 	Files     []*FileInfo `json:"files,omitempty"`
 	Reactions []*Reaction `json:"reactions,omitempty"`
+	// Embeds are the server's link previews (type "opengraph").
+	Embeds []*PostEmbed `json:"embeds,omitempty"`
+	// Images holds the size of images the post refers to, keyed by URL.
+	Images map[string]*PostImage `json:"images,omitempty"`
+}
+
+// PostEmbed is something the server unfurled for a post.
+type PostEmbed struct {
+	Type string          `json:"type"`
+	URL  string          `json:"url"`
+	Data json.RawMessage `json:"data,omitempty"`
+}
+
+// OpenGraph is an "opengraph" embed's data.
+type OpenGraph struct {
+	URL         string           `json:"url"`
+	Type        string           `json:"type"`
+	Title       string           `json:"title"`
+	Description string           `json:"description"`
+	SiteName    string           `json:"site_name"`
+	Images      []OpenGraphImage `json:"images"`
+}
+
+// OpenGraphImage is an image of a link preview.
+type OpenGraphImage struct {
+	URL       string `json:"url"`
+	SecureURL string `json:"secure_url"`
+	Type      string `json:"type"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+}
+
+// PostImage is an image's size as the server measured it.
+type PostImage struct {
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	Format string `json:"format"`
+}
+
+// IsSystem reports whether the post is a server message ("jw joined the
+// channel"), not something a user wrote.
+func (p *Post) IsSystem() bool {
+	return p != nil && strings.HasPrefix(p.Type, "system_")
 }
 
 // FileInfo describes a file attached to a post.

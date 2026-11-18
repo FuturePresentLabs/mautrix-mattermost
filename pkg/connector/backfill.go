@@ -174,14 +174,7 @@ func (c *MattermostClient) newBackfillMessage(
 	post *mattermost.Post,
 	threadRoot networkid.MessageID,
 ) *bridgev2.BackfillMessage {
-	isFromMe := c.UserID != "" && post.UserID == c.UserID
-	sender := bridgev2.EventSender{
-		Sender:   networkid.UserID(post.UserID),
-		IsFromMe: isFromMe,
-	}
-	if isFromMe && c.UserLogin != nil {
-		sender.SenderLogin = c.UserLogin.ID
-	}
+	sender := c.postSender(post)
 
 	converted, err := c.convertPost(ctx, intent, portal.MXID, post)
 	if err != nil || converted == nil || len(converted.Parts) == 0 {
