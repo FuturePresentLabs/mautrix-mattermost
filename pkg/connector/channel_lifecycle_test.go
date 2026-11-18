@@ -154,7 +154,7 @@ type lifecycleOptions struct {
 	noBridgeConfig bool
 	// asyncEvents sets Bridge.Config.AsyncEvents.
 	asyncEvents bool
-	// inlineEvents sets bridgev2.PortalEventBuffer to 0 for the test.
+	// inlineEvents sets Bridge.Config.PortalEventBuffer to 0.
 	inlineEvents bool
 }
 
@@ -184,7 +184,11 @@ func newLifecycleHarness(t *testing.T, opts lifecycleOptions) *lifecycleHarness 
 	if !opts.noLogin {
 		br := &bridgev2.Bridge{Log: zerolog.Nop()}
 		if !opts.noBridgeConfig {
-			br.Config = &bridgeconfig.BridgeConfig{AsyncEvents: opts.asyncEvents}
+			buffer := 64 // the shipped default (portal_event_buffer)
+			if opts.inlineEvents {
+				buffer = 0
+			}
+			br.Config = &bridgeconfig.BridgeConfig{AsyncEvents: opts.asyncEvents, PortalEventBuffer: buffer}
 		}
 		c.UserLogin = &bridgev2.UserLogin{
 			UserLogin: &database.UserLogin{ID: "login-test"},
@@ -197,11 +201,6 @@ func newLifecycleHarness(t *testing.T, opts lifecycleOptions) *lifecycleHarness 
 			h.recordProbe(channelID)
 			return opts.probe(channelID)
 		}
-	}
-	if opts.inlineEvents {
-		previous := bridgev2.PortalEventBuffer
-		bridgev2.PortalEventBuffer = 0
-		t.Cleanup(func() { bridgev2.PortalEventBuffer = previous })
 	}
 	h.client = c
 	return h
