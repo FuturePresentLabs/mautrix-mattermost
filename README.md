@@ -191,8 +191,10 @@ its homeserver drops presence, but titles always show.
 
 ## Spaces and read sync
 
-Each Mattermost team is a Matrix space, named and pictured like the team (its icon
-follows changes in Mattermost). The team's channels are in its space, so channels with
+With `network.team_spaces: true`, each Mattermost team is a Matrix space, named and
+pictured like the team (its icon follows changes in Mattermost). It is off by default:
+Beeper's per-account inbox filters, such as showing only DMs, do not apply to rooms
+inside these spaces. Turning it off moves the channels back out and removes the spaces. The team's channels are in its space, so channels with
 the same name in two teams, such as Town Square, are told apart by their space. DMs and
 group DMs belong to no team and stay outside the team spaces.
 

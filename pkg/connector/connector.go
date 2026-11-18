@@ -80,6 +80,7 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Bool, "presence", "enabled")
 	helper.Copy(configupgrade.Str, "display_names")
 	helper.Copy(configupgrade.Str, "dm_status")
+	helper.Copy(configupgrade.Bool, "team_spaces")
 }
 
 func (m *MattermostConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
@@ -503,6 +504,9 @@ type Config struct {
 	// DMStatus picks how the other person's status shows on 1:1 DM titles
 	// (see dmstatus.go). Empty means "all".
 	DMStatus string `yaml:"dm_status"`
+	// TeamSpaces puts each team's channels in a Matrix space for the team
+	// (see teams.go). Off by default.
+	TeamSpaces bool `yaml:"team_spaces"`
 }
 
 const ExampleConfig = `# Mattermost Bridge Configuration
@@ -530,4 +534,10 @@ display_names: server
 #   dnd  - only do not disturb: alice ⛔
 #   off  - plain names
 dm_status: all
+
+# Put each Mattermost team's channels in a Matrix space named and pictured like
+# the team. Off by default: Beeper's per-account inbox filters (such as showing
+# only DMs) do not apply to rooms inside these spaces. Turning it off moves the
+# channels back out and removes the team spaces.
+team_spaces: false
 `

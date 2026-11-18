@@ -111,6 +111,7 @@ func TestGetChatInfoForTeamSpace(t *testing.T) {
 
 func TestChannelResyncHasTeamParent(t *testing.T) {
 	c, _ := dmClient("off")
+	c.teamSpacesFn = func() bool { return true }
 	ch := &mattermost.Channel{ID: "c1", TeamID: "t1", Type: "O", DisplayName: "Town Square"}
 	info, err := c.channelResyncEvent(ch).GetChatInfoFunc(context.Background(), nil)
 	if err != nil || info.ParentID == nil || *info.ParentID != "team:t1" {
@@ -145,6 +146,7 @@ func TestTeamSpacesNeverTreatedAsChannels(t *testing.T) {
 
 func TestTeamUpdatesQueueSpaceResync(t *testing.T) {
 	p := newProcessEventsHarness(t, lifecycleOptions{})
+	p.client.teamSpacesFn = func() bool { return true }
 	p.deliver(&mattermost.TeamUpdatedEvent{Team: &mattermost.Team{ID: "t1", DisplayName: "Renamed"}})
 	evs := p.events.drain()
 	if len(evs) != 1 {
@@ -169,6 +171,7 @@ func TestSyncCreatesTeamSpacesBeforeChannels(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := teamClient(srv.URL)
+	c.teamSpacesFn = func() bool { return true }
 	var mu sync.Mutex
 	var keys []string
 	c.queueRemoteEventFn = func(ev bridgev2.RemoteEvent) bridgev2.EventHandlingResult {
@@ -184,5 +187,63 @@ func TestSyncCreatesTeamSpacesBeforeChannels(t *testing.T) {
 	defer mu.Unlock()
 	if strings.Join(keys, ",") != "team:t1,team:t2,c1" {
 		t.Fatalf("resyncs = %v, want both spaces before the channel", keys)
+	}
+}
+
+func TestTeamSpacesOffMovesChannelsOutAndDeletesSpaces(t *testing.T) {
+	c, _ := dmClient("off")
+	c.teamSpacesFn = func() bool { return false }
+	ch := &mattermost.Channel{ID: "c1", TeamID: "t1", Type: "O", DisplayName: "Town Square"}
+	info, _ := c.channelResyncEvent(ch).GetChatInfoFunc(context.Background(), nil)
+	if info.ParentID == nil || *info.ParentID != "" {
+		t.Fatalf("parent = %v, want explicitly none (moves the room out of a team space)", info.ParentID)
+	}
+	dm := &mattermost.Channel{ID: "dm1", Type: "D", Name: dmSelfID + "__" + dmOtherID}
+	if info, _ := c.channelResyncEvent(dm).GetChatInfoFunc(context.Background(), nil); info.ParentID != nil {
+		t.Fatalf("DM parent = %v, want untouched", *info.ParentID)
+	}
+
+	var queued []bridgev2.RemoteEvent
+	c.queueRemoteEventFn = func(ev bridgev2.RemoteEvent) bridgev2.EventHandlingResult {
+		queued = append(queued, ev)
+		return bridgev2.EventHandlingResultQueued
+	}
+	c.syncTeams([]*mattermost.Team{{ID: "t1"}, {ID: "t2"}})
+	c.queueTeamResync(&mattermost.Team{ID: "t1"}) // e.g. update_team: nothing with spaces off
+	if len(queued) != 2 {
+		t.Fatalf("queued %d events, want two space deletions", len(queued))
+	}
+	for i, want := range []string{"team:t1", "team:t2"} {
+		if queued[i].GetType() != bridgev2.RemoteEventChatDelete || string(queued[i].GetPortalKey().ID) != want {
+			t.Fatalf("event %d = %v %v, want delete of %s", i, queued[i].GetType(), queued[i].GetPortalKey(), want)
+		}
+	}
+}
+
+func TestTeamSpacesConfig(t *testing.T) {
+	c := teamClient("http://unused")
+	if c.teamSpacesEnabled() {
+		t.Fatal("team spaces on without config")
+	}
+	c.UserLogin.Bridge = &bridgev2.Bridge{Network: &MattermostConnector{Config: &Config{TeamSpaces: true}}}
+	if !c.teamSpacesEnabled() {
+		t.Fatal("team_spaces: true ignored")
+	}
+}
+
+func TestGetChatInfoFollowsTeamSpacesSetting(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		c, _ := dmClient("off")
+		c.baseURL = "http://127.0.0.1:1" // fresh fetch fails; the cached channel is used
+		c.channels["c1"] = &mattermost.Channel{ID: "c1", TeamID: "t1", Type: "O", DisplayName: "Town Square"}
+		c.teamSpacesFn = func() bool { return on }
+		info, err := c.GetChatInfo(context.Background(), &bridgev2.Portal{Portal: &database.Portal{PortalKey: networkid.PortalKey{ID: "c1"}}})
+		want := ""
+		if on {
+			want = "team:t1"
+		}
+		if err != nil || info.ParentID == nil || string(*info.ParentID) != want {
+			t.Fatalf("team_spaces=%v: parent = %v err=%v, want %q", on, info.ParentID, err, want)
+		}
 	}
 }

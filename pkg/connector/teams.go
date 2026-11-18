@@ -53,6 +53,47 @@ func channelParent(ch *mattermost.Channel) *networkid.PortalID {
 	return ptr.Ptr(teamPortalID(ch.TeamID))
 }
 
+// teamSpacesEnabled reports network.team_spaces.
+func (c *MattermostClient) teamSpacesEnabled() bool {
+	if c.teamSpacesFn != nil {
+		return c.teamSpacesFn()
+	}
+	if c.UserLogin != nil && c.UserLogin.Bridge != nil {
+		if conn, ok := c.UserLogin.Bridge.Network.(*MattermostConnector); ok && conn.Config != nil {
+			return conn.Config.TeamSpaces
+		}
+	}
+	return false
+}
+
+// roomParent is the parent to set on a channel's room. With team spaces off
+// it is explicitly none, which also moves a room out of a team space it was
+// put in while they were on.
+func (c *MattermostClient) roomParent(ch *mattermost.Channel) *networkid.PortalID {
+	if c.teamSpacesEnabled() {
+		return channelParent(ch)
+	}
+	if ch == nil || ch.TeamID == "" || ch.IsDM() || ch.IsGroupDM() {
+		return nil // never had a team space
+	}
+	return ptr.Ptr(networkid.PortalID(""))
+}
+
+// syncTeams creates or updates the team spaces, or with team spaces off
+// deletes any left from when they were on (a delete for a space that was
+// never created is ignored).
+func (c *MattermostClient) syncTeams(teams []*mattermost.Team) {
+	for _, team := range teams {
+		if c.teamSpacesEnabled() {
+			c.queueTeamResync(team)
+			continue
+		}
+		c.queueEvent(&mmChatDeleteEvent{
+			portalKey: networkid.PortalKey{ID: teamPortalID(team.ID), Receiver: c.UserLogin.ID},
+		})
+	}
+}
+
 // teamInfo is a team space's room info: the team's name and icon, the user
 // as the only member, and nobody but the bridge allowed to post.
 func (c *MattermostClient) teamInfo(team *mattermost.Team) *bridgev2.ChatInfo {
@@ -105,6 +146,9 @@ func (c *MattermostClient) teamChatInfo(teamID string) (*bridgev2.ChatInfo, erro
 
 // queueTeamResync creates or updates a team's space (name and icon).
 func (c *MattermostClient) queueTeamResync(team *mattermost.Team) {
+	if !c.teamSpacesEnabled() {
+		return
+	}
 	info := c.teamInfo(team)
 	c.queueEvent(&simplevent.ChatResync{
 		EventMeta: simplevent.EventMeta{
