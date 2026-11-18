@@ -57,13 +57,40 @@ func (c *MattermostClient) swapMuted(channelID string, muted bool) bool {
 	return !known || old != muted
 }
 
-// userLocalInfo is a new room's mute: muted forever when the channel is
-// muted in Mattermost, otherwise nothing (the room keeps its own state).
+// userLocalInfo is a room's mute: muted forever when the channel is muted in
+// Mattermost, or when it is a team channel getting its room and
+// network.mute_channels_on_create is on; otherwise nothing (the room keeps
+// its own state). The create-time mute is never sent for an existing room, so
+// unmuting a channel in Matrix sticks whatever the framework's mute settings.
 func (c *MattermostClient) userLocalInfo(channelID string) *bridgev2.UserLocalPortalInfo {
 	if muted, _ := c.channelMuted(channelID); muted {
 		return &bridgev2.UserLocalPortalInfo{MutedUntil: &event.MutedForever}
 	}
+	if c.muteChannelsOnCreate() && c.isTeamChannel(channelID) && !c.hasPortal(channelID) {
+		return &bridgev2.UserLocalPortalInfo{MutedUntil: &event.MutedForever}
+	}
 	return nil
+}
+
+// muteChannelsOnCreate reports network.mute_channels_on_create (off without
+// a bridge config).
+func (c *MattermostClient) muteChannelsOnCreate() bool {
+	if c.muteChannelsFn != nil {
+		return c.muteChannelsFn()
+	}
+	if cfg := bridgeConfig(c.bridge()); cfg != nil {
+		return cfg.MuteChannelsOnCreate
+	}
+	return false
+}
+
+// isTeamChannel reports whether a known channel belongs to a team (not a DM
+// or group DM).
+func (c *MattermostClient) isTeamChannel(channelID string) bool {
+	c.mu.RLock()
+	ch := c.channels[channelID]
+	c.mu.RUnlock()
+	return ch != nil && ch.TeamID != "" && !ch.IsDM() && !ch.IsGroupDM()
 }
 
 func (c *MattermostClient) fetchMemberships(teamID string) ([]*mattermost.ChannelMember, error) {

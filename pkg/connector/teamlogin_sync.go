@@ -29,16 +29,13 @@ func (c *MattermostClient) ownsPost(evt *mattermost.PostedEvent) bool {
 // ownTeams is the teams this login bridges: its team, or all of them for a
 // login without one.
 func (c *MattermostClient) ownTeams(teams []*mattermost.Team) []*mattermost.Team {
-	scope := c.teamScope()
-	if scope == "" {
-		return teams
-	}
+	var out []*mattermost.Team
 	for _, t := range teams {
-		if t.ID == scope {
-			return []*mattermost.Team{t}
+		if c.ownsTeam(t.ID) {
+			out = append(out, t)
 		}
 	}
-	return nil
+	return out
 }
 
 // pinLegacyLogin gives a login made before teams were per login its team:
@@ -46,7 +43,7 @@ func (c *MattermostClient) ownTeams(teams []*mattermost.Team) []*mattermost.Team
 func (c *MattermostClient) pinLegacyLogin(teams []*mattermost.Team) {
 	lg := c.lifecycleLogger()
 	meta := c.loginMeta()
-	if meta == nil || meta.TeamID != "" {
+	if meta == nil || meta.TeamID != "" || c.accountLogins() {
 		return
 	}
 	team := teamForLegacyLogin(teams)
@@ -183,7 +180,7 @@ func (c *MattermostClient) removeForeignPortals(foreign map[string]bool) {
 		if !c.hasPortal(id) {
 			continue
 		}
-		lg.Info().Str("channel_id", id).Msg("Removing room: the channel belongs to another login")
+		lg.Info().Str("channel_id", id).Msg("Removing room: this login does not bridge the channel")
 		c.queueEvent(&mmChatDeleteEvent{
 			portalKey: networkid.PortalKey{ID: networkid.PortalID(id), Receiver: c.UserLogin.ID},
 		})

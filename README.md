@@ -189,27 +189,31 @@ Statuses come from the same 30-second poll as presence (see below), which runs w
 either feature is on. Matrix presence itself is not needed, which matters on Beeper:
 its homeserver drops presence, but titles always show.
 
-## One login per team
+## Teams
 
-Each Mattermost team is a separate login, so clients that group and filter by account
-(such as Beeper's inbox toggles) treat each team as its own account. The login is named
-after the team and uses the team icon. Log in once per team with the same credentials;
-when you belong to more than one team, the login asks which team to bridge.
+By default one login covers your whole Mattermost account, the way Beeper's Discord
+bridge covers a Discord account:
+
+- Your DMs and group DMs are always bridged.
+- Each team is switched off until you switch it on. In the bridge's management room,
+  `team` lists your teams with their state, and `team on <team>` or `team off <team>`
+  switches one (by name, handle or ID). Switching a team off removes its rooms.
+- Each switched-on team gets a space named and pictured like the team, holding its
+  channels (`network.team_spaces`, on by default).
+- New channel rooms start muted, so channels stay quiet while DMs notify; unmute the
+  ones you want to hear from (`network.mute_channels_on_create`, on by default). Rooms
+  that already exist are never re-muted.
 
 When your account is in more than one team, team channels are named with their team,
-such as `Town Square · Example`, since a client may show every login with the same icon.
+such as `Town Square · Example`.
 
-DMs and group DMs belong to no team, so exactly one of your logins carries them: your
-first login, unless you choose another with `dm-team <team>` in the bridge's management
-room (`dm-team` alone lists your logins). Moving them recreates the DM rooms under the
-new login, with history re-imported.
+### One login per team
 
-A login made before logins had teams is pinned on its next connect to your first team
-by name, and keeps the DMs. Its rooms for other teams' channels are removed; add a login
-for each other team to bridge them again.
-
-`network.team_spaces: true` additionally puts a login's channels in a space for the team.
-It is off by default: Beeper's inbox filters do not apply to rooms inside these spaces.
+With `network.team_logins: true`, each team is a separate login instead: log in once
+per team, and the login asks which team to bridge. The login is named after the team
+and uses its icon. Exactly one of the logins carries the DMs: your first, unless you
+choose another with `dm-team <team>` (`dm-team` alone lists them). A login made before
+logins had teams is pinned to your first team by name on its next connect.
 
 ## Read sync
 

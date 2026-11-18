@@ -79,14 +79,15 @@ func (c *MattermostClient) roomParent(ch *mattermost.Channel) *networkid.PortalI
 	return ptr.Ptr(networkid.PortalID(""))
 }
 
-// syncTeams creates or updates the team spaces, or with team spaces off
-// deletes any left from when they were on (a delete for a space that was
-// never created is ignored). A space is deleted only once no room has it as
-// parent: rooms leave it through their own resyncs, which run on other
-// queues, and deleting a parent first fails. The next sync retries.
+// syncTeams creates or updates the spaces of the teams this login bridges,
+// and deletes the spaces of the others: teams switched off, or all teams with
+// team spaces off (a delete for a space that was never created is ignored).
+// A space is deleted only once no room has it as parent: rooms leave it
+// through their own resyncs, which run on other queues, and deleting a parent
+// first fails. The next sync retries.
 func (c *MattermostClient) syncTeams(teams []*mattermost.Team) {
 	for _, team := range teams {
-		if c.teamSpacesEnabled() {
+		if c.teamSpacesEnabled() && c.ownsTeam(team.ID) {
 			c.queueTeamResync(team)
 			continue
 		}

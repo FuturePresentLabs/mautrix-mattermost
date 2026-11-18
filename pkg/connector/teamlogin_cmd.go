@@ -24,7 +24,7 @@ var cmdDMTeam = &commands.FullHandler{
 
 func registerCommands(br *bridgev2.Bridge) {
 	if proc, ok := br.Commands.(*commands.Processor); ok {
-		proc.AddHandlers(cmdDMTeam)
+		proc.AddHandlers(cmdDMTeam, cmdTeam)
 	}
 }
 
