@@ -125,7 +125,7 @@ type PostImage struct {
 	Format string `json:"format"`
 }
 
-// IsSystem reports whether the post is a server message ("jw joined the
+// IsSystem reports whether the post is a server message ("alice joined the
 // channel"), not something a user wrote.
 func (p *Post) IsSystem() bool {
 	return p != nil && strings.HasPrefix(p.Type, "system_")

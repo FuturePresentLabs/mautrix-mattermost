@@ -150,7 +150,7 @@ func checkPreviewImage(data []byte, declared string) ([]byte, string, error) {
 	return data, mime, nil
 }
 
-// systemNotice is a server message ("jw joined the channel") as a notice
+// systemNotice is a server message ("alice joined the channel") as a notice
 // from the bridge bot rather than a message from the user it names.
 func systemNotice(post *mattermost.Post) *bridgev2.ConvertedMessage {
 	_, threadRoot := threadRelation(post)
