@@ -220,11 +220,13 @@ type Team struct {
 	LastTeamIconUpdate int64 `json:"last_team_icon_update"`
 }
 
-// ChannelMember represents a user's membership in a channel.
+// ChannelMember represents a user's membership in a channel, with their
+// notification preferences for it.
 type ChannelMember struct {
-	ChannelID string `json:"channel_id"`
-	UserID    string `json:"user_id"`
-	Roles     string `json:"roles"`
+	ChannelID   string            `json:"channel_id"`
+	UserID      string            `json:"user_id"`
+	Roles       string            `json:"roles"`
+	NotifyProps map[string]string `json:"notify_props,omitempty"`
 }
 
 // Reaction is an emoji reaction attached to a post.
@@ -272,6 +274,12 @@ type WSAuthResponse struct {
 // HelloEvent is published by the server when a WS connection is established.
 type HelloEvent struct {
 	ServerVersion string `json:"server_version"`
+}
+
+// ChannelMemberUpdatedEvent carries a change to the user's membership of a
+// channel, such as muting it.
+type ChannelMemberUpdatedEvent struct {
+	Member *ChannelMember
 }
 
 // EphemeralEvent carries a post shown only to this user and never stored,

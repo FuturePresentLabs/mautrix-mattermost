@@ -131,6 +131,11 @@ type MattermostClient struct {
 	// Test hooks for slash commands.
 	listCommandsFn   func(teamID string) ([]mattermost.Command, error)
 	executeCommandFn func(channelID, teamID, rootID, command string) (*mattermost.CommandResponse, error)
+	// muted is Mattermost's mute state per channel (mutes.go). Guarded by mu.
+	muted map[string]bool
+	// Test hooks for mutes.
+	membershipsFn func(teamID string) ([]*mattermost.ChannelMember, error)
+	muteRoomFn    func(channelID string, until time.Time) bool
 	// clearSpaceParentsFn overrides unlinking rooms from a team space.
 	clearSpaceParentsFn func(teamID string)
 	// viewChannelFn, markThreadReadFn and threadRootFn override the read
@@ -228,6 +233,7 @@ func (c *MattermostClient) channelResyncEvent(ch *mattermost.Channel) *simpleven
 				Members:     c.chatMembers(ctx, ch), // caches the DM partner's profile
 				CanBackfill: true,
 				ParentID:    c.roomParent(ch), // the team's space, if on (teams.go)
+				UserLocal:   c.userLocalInfo(ch.ID),
 			}
 			// A DM is titled after the other person, with their status.
 			if title, topic := c.dmRoomInfo(ch); title != nil {
@@ -554,6 +560,9 @@ func (c *MattermostClient) processEvents() {
 		case *mattermost.ChannelsViewedEvent:
 			c.handleChannelsViewed(evt)
 
+		case *mattermost.ChannelMemberUpdatedEvent:
+			c.handleMemberUpdated(context.Background(), evt.Member)
+
 		case *mattermost.EphemeralEvent:
 			c.relayEphemeral(evt.Post)
 
@@ -595,6 +604,7 @@ func (c *MattermostClient) syncChannels() {
 	seenChannels := make(map[string]bool)
 	foreign := make(map[string]bool) // listed, but bridged by another login
 	listingComplete := true
+	mutesComplete := true
 
 	c.noteTeams(teams)
 	c.pinLegacyLogin(teams)
@@ -608,6 +618,10 @@ func (c *MattermostClient) syncChannels() {
 		if err != nil {
 			listingComplete = false
 			continue
+		}
+
+		if !c.syncMemberships(team.ID) {
+			mutesComplete = false
 		}
 
 		var owned []*mattermost.Channel
@@ -637,6 +651,8 @@ func (c *MattermostClient) syncChannels() {
 			c.queueAccessSync(ch.ID)
 		}
 	}
+
+	c.syncExistingMutes(context.Background(), listingComplete && mutesComplete)
 
 	// Rooms this login has for other logins' channels (made before teams
 	// were per login) are removed; the owning login has its own.

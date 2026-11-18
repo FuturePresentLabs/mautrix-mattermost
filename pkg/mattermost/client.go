@@ -176,6 +176,13 @@ func (c *Client) parseEvent(raw []byte) {
 		}
 		c.Events <- &PostEditedEvent{Post: post, ChannelID: post.ChannelID}
 
+	case "channel_member_updated":
+		var m ChannelMember
+		if raw := strFromData(env.Data, "channelMember"); raw == "" || json.Unmarshal([]byte(raw), &m) != nil || m.ChannelID == "" {
+			return
+		}
+		c.Events <- &ChannelMemberUpdatedEvent{Member: &m}
+
 	case "ephemeral_message":
 		post := decodePost(env.Data, "post")
 		if post == nil {

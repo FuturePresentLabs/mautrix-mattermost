@@ -149,6 +149,9 @@ type UserLoginMetadata struct {
 	// TeamIcon is the team icon last set as the login's avatar
 	// ("<team id>_<last_team_icon_update>"), so it is uploaded once.
 	TeamIcon string `json:"team_icon,omitempty"`
+	// MutesSynced is set once the rooms that existed before mutes were
+	// bridged have been muted where their channel is (mutes.go).
+	MutesSynced bool `json:"mutes_synced,omitempty"`
 }
 
 // --- PAT Login ---

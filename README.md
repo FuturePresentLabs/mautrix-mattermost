@@ -218,6 +218,18 @@ Mattermost, and viewing a channel in Mattermost marks it read in Matrix. Matterm
 only mark a channel read up to the present, so a message arriving in the second between
 your client showing a room and the bridge passing on the receipt is marked read as well.
 
+## Mutes
+
+Channels you mute in Mattermost ("Mute channel") are muted in Matrix too:
+
+- A room created for a muted channel starts muted.
+- Rooms that existed before this was added are muted once where their channel
+  is muted; nothing is unmuted by this.
+- Muting or unmuting a channel in Mattermost later does the same to its room.
+
+It only goes one way. Muting a room in Matrix stays in Matrix and does not
+change your Mattermost notifications.
+
 ## Slash commands
 
 A message from Matrix that starts with a slash command you can run in Mattermost,
