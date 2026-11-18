@@ -121,6 +121,11 @@ type MattermostClient struct {
 	// viewedAt is how far each channel is known read (see readsync.go).
 	// Guarded by mu.
 	viewedAt map[string]time.Time
+	// teamLabels maps the account's team IDs to their names, for channel
+	// names (teamnames.go). Guarded by mu.
+	teamLabels map[string]string
+	// clearSpaceParentsFn overrides unlinking rooms from a team space.
+	clearSpaceParentsFn func(teamID string)
 	// viewChannelFn, markThreadReadFn and threadRootFn override the read
 	// sync requests and thread lookup in tests.
 	viewChannelFn    func(channelID string) error
@@ -196,8 +201,7 @@ func (c *MattermostClient) channelResyncEvent(ch *mattermost.Channel) *simpleven
 	}
 
 	var name *string
-	if ch.DisplayName != "" {
-		n := ch.DisplayName
+	if n := c.channelTitle(ch); n != "" {
 		name = &n
 	}
 
@@ -473,7 +477,7 @@ func (c *MattermostClient) processEvents() {
 				c.channels[evt.Channel.ID] = evt.Channel
 			}
 			c.mu.Unlock()
-			newName := evt.Channel.DisplayName
+			newName := c.channelTitle(evt.Channel)
 			// Updates can arrive out of order. Only an explicit restoration or
 			// fresh provider state supersedes a pending deletion check.
 			c.queueEvent(&simplevent.ChatInfoChange{
@@ -582,6 +586,7 @@ func (c *MattermostClient) syncChannels() {
 	foreign := make(map[string]bool) // listed, but bridged by another login
 	listingComplete := true
 
+	c.noteTeams(teams)
 	c.pinLegacyLogin(teams)
 	c.syncLoginProfile(teams)
 

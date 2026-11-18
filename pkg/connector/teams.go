@@ -93,6 +93,7 @@ func (c *MattermostClient) syncTeams(teams []*mattermost.Team) {
 		if c.spaceHasChildren(team.ID) {
 			continue
 		}
+		c.clearSpaceParents(team.ID)
 		c.queueEvent(&mmChatDeleteEvent{
 			portalKey: networkid.PortalKey{ID: teamPortalID(team.ID), Receiver: c.UserLogin.ID},
 		})
