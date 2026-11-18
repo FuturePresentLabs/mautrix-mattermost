@@ -12,7 +12,7 @@ import (
 )
 
 // Channel names carry their team when the account is in more than one team:
-// "Town Square · FPL". Each team is its own login (teamlogin.go), but a
+// "Town Square · Example". Each team is its own login (teamlogin.go), but a
 // client may show every login with the same icon, and then the name is the
 // only thing that tells two teams' Town Squares apart. DMs and group DMs
 // have no team and keep their names.
