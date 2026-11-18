@@ -1,0 +1,18 @@
+{
+  "kind": "MicroVM",
+  "metadata": { "name": "mautrix-mattermost" },
+  "spec": {
+    "image": "localhost/mautrix-mattermost:dev",
+    "resources": { "cpu": 1, "memoryMiB": 512 },
+    "networking": { "tapDeviceName": "sh-mm", "ports": [] },
+    "lifecycle": { "autostart": true, "deleteOnExit": false },
+    "health": { "enabled": false },
+    "blockVolumes": [{
+      "path": "/data/mautrix-mattermost",
+      "hostPath": "/var/lib/shroud/persistence/mautrix-mattermost.ext4",
+      "seedPath": null,
+      "sizeMiB": 1024,
+      "ephemeral": false
+    }]
+  }
+}

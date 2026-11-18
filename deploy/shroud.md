@@ -207,6 +207,18 @@ Sizing: 1 CPU / 256 MiB is enough for a small bridge; 512 MiB leaves room for
 backfill and media handling. The database grows with bridged history, so give
 the volume room and back it up while the VM is stopped.
 
+The checked-in template is `deploy/shroud-vm.json.example`: no inbound port,
+health disabled because websocket mode starts no HTTP listener, and one 1 GiB
+block volume. On a host whose Shroud daemon runs with `--no-autostart`, install
+the replay unit so the VM starts after boot:
+
+```sh
+install -m 0644 deploy/mautrix-mattermost-replay.service /etc/systemd/system/
+systemd-analyze verify /etc/systemd/system/mautrix-mattermost-replay.service
+systemctl daemon-reload
+systemctl enable --now mautrix-mattermost-replay.service
+```
+
 ## 5. Verify
 
 ```sh

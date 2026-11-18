@@ -1,0 +1,13 @@
+[Unit]
+Description=mautrix-mattermost microVM boot replay (Shroud runs with --no-autostart)
+After=shroud.service network-online.target
+Wants=shroud.service network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=120
+ExecStart=/bin/sh -c 'for i in $(seq 1 60); do [ -S /var/lib/shroud/control.sock ] && break; sleep 1; done; printf "{\"action\":\"start\",\"vm\":\"mautrix-mattermost\"}\n" | /usr/bin/socat - UNIX-CONNECT:/var/lib/shroud/control.sock'
+
+[Install]
+WantedBy=multi-user.target
