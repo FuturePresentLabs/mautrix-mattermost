@@ -18,20 +18,20 @@ import (
 const testPostID = "6iipo5hskp89bqqxoekgbhnoje"
 
 func TestFindPermalinks(t *testing.T) {
-	const server = "https://mm.fpl.dev"
+	const server = "https://mm.example.com"
 	cases := []struct {
 		name string
 		text string
 		want []string // post IDs
 	}{
-		{"plain permalink", "https://mm.fpl.dev/fpl/pl/" + testPostID, []string{testPostID}},
-		{"with query and fragment", "https://mm.fpl.dev/fpl/pl/" + testPostID + "?focus=true#abc", []string{testPostID}},
-		{"sentence punctuation", "see https://mm.fpl.dev/fpl/pl/" + testPostID + ".", []string{testPostID}},
-		{"http and port", "http://mm.fpl.dev:8065/fpl/pl/" + testPostID, []string{testPostID}},
-		{"other host untouched", "https://example.com/fpl/pl/" + testPostID, nil},
-		{"same host, different path", "https://mm.fpl.dev/fpl/channels/town-square", nil},
-		{"bare path without host", "/fpl/pl/" + testPostID, nil},
-		{"short id is not a post", "https://mm.fpl.dev/fpl/pl/abc123", nil},
+		{"plain permalink", "https://mm.example.com/example/pl/" + testPostID, []string{testPostID}},
+		{"with query and fragment", "https://mm.example.com/example/pl/" + testPostID + "?focus=true#abc", []string{testPostID}},
+		{"sentence punctuation", "see https://mm.example.com/example/pl/" + testPostID + ".", []string{testPostID}},
+		{"http and port", "http://mm.example.com:8065/example/pl/" + testPostID, []string{testPostID}},
+		{"other host untouched", "https://example.com/example/pl/" + testPostID, nil},
+		{"same host, different path", "https://mm.example.com/example/channels/town-square", nil},
+		{"bare path without host", "/example/pl/" + testPostID, nil},
+		{"short id is not a post", "https://mm.example.com/example/pl/abc123", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -61,12 +61,12 @@ func TestFindPermalinksDedupesAndCaps(t *testing.T) {
 	}
 	var parts []string
 	for i, id := range ids {
-		parts = append(parts, "https://mm.fpl.dev/fpl/pl/"+id)
+		parts = append(parts, "https://mm.example.com/example/pl/"+id)
 		if i == 0 {
-			parts = append(parts, "https://mm.fpl.dev/fpl/pl/"+id) // duplicate, early
+			parts = append(parts, "https://mm.example.com/example/pl/"+id) // duplicate, early
 		}
 	}
-	got := findPermalinks(strings.Join(parts, " "), "https://mm.fpl.dev")
+	got := findPermalinks(strings.Join(parts, " "), "https://mm.example.com")
 	if len(got) != maxPreviewsPerMessage {
 		t.Fatalf("got %d permalinks, want the cap of %d", len(got), maxPreviewsPerMessage)
 	}
@@ -175,7 +175,7 @@ func TestAttachPermalinkQuotes(t *testing.T) {
 	defer srv.Close()
 	c := &MattermostClient{nameFormat: mattermost.NameFormatNicknameFullName, Token: "tok", baseURL: srv.URL}
 
-	url := srv.URL + "/fpl/pl/" + testPostID
+	url := srv.URL + "/example/pl/" + testPostID
 	content := &event.MessageEventContent{MsgType: event.MsgText, Body: "look: " + url}
 	c.attachPermalinkQuotes(context.Background(), content, content.Body)
 
@@ -214,7 +214,7 @@ func TestAttachPermalinkQuotes(t *testing.T) {
 		t.Error("changed the message with a cancelled context")
 	}
 	// A link that does not resolve leaves the message untouched.
-	dead := &event.MessageEventContent{Body: srv.URL + "/fpl/pl/zzzzzzzzzzzzzzzzzzzzzzzzzz"}
+	dead := &event.MessageEventContent{Body: srv.URL + "/example/pl/zzzzzzzzzzzzzzzzzzzzzzzzzz"}
 	c.attachPermalinkQuotes(context.Background(), dead, dead.Body)
 	if dead.FormattedBody != "" || strings.Contains(dead.Body, ">") {
 		t.Errorf("changed a message whose link did not resolve: %+v", dead)
@@ -236,7 +236,7 @@ func TestAttachPermalinkQuotesRendersMarkdownAndEscapes(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := &MattermostClient{nameFormat: mattermost.NameFormatNicknameFullName, Token: "tok", baseURL: srv.URL}
-	url := srv.URL + "/fpl/pl/" + testPostID
+	url := srv.URL + "/example/pl/" + testPostID
 	// An existing HTML body is kept and the quote is appended to it.
 	content := &event.MessageEventContent{Body: url, Format: event.FormatHTML, FormattedBody: "<em>see</em> " + url}
 	c.attachPermalinkQuotes(context.Background(), content, url)
@@ -267,7 +267,7 @@ func TestAttachPermalinkQuotesBudget(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := &MattermostClient{nameFormat: mattermost.NameFormatNicknameFullName, Token: "tok", baseURL: srv.URL}
-	text := srv.URL + "/fpl/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa " + srv.URL + "/fpl/pl/bbbbbbbbbbbbbbbbbbbbbbbbbb"
+	text := srv.URL + "/example/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa " + srv.URL + "/example/pl/bbbbbbbbbbbbbbbbbbbbbbbbbb"
 	content := &event.MessageEventContent{Body: text}
 	c.attachPermalinkQuotes(context.Background(), content, text)
 
@@ -289,7 +289,7 @@ func TestConvertPostAndEditQuotePermalink(t *testing.T) {
 	var requests int
 	srv := previewServer(t, &requests)
 	defer srv.Close()
-	url := srv.URL + "/fpl/pl/" + testPostID
+	url := srv.URL + "/example/pl/" + testPostID
 	c := &MattermostClient{nameFormat: mattermost.NameFormatNicknameFullName, Token: "tok", baseURL: srv.URL, UserID: "me"}
 
 	cm, err := c.convertPost(context.Background(), nil, "!room:test", &mattermost.Post{ID: "p1", UserID: "u2", ChannelID: "c1", Message: url})
