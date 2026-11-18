@@ -16,6 +16,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/bridgev2/status"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/format"
 	"maunium.net/go/mautrix/id"
 
 	"github.com/bostrot/mautrix-mattermost/pkg/mattermost"
@@ -124,6 +125,12 @@ type MattermostClient struct {
 	// teamLabels maps the account's team IDs to their names, for channel
 	// names (teamnames.go). Guarded by mu.
 	teamLabels map[string]string
+	// commands caches each team's slash command triggers (commands.go).
+	// Guarded by mu.
+	commands map[string]*commandCache
+	// Test hooks for slash commands.
+	listCommandsFn   func(teamID string) ([]mattermost.Command, error)
+	executeCommandFn func(channelID, teamID, rootID, command string) (*mattermost.CommandResponse, error)
 	// clearSpaceParentsFn overrides unlinking rooms from a team space.
 	clearSpaceParentsFn func(teamID string)
 	// viewChannelFn, markThreadReadFn and threadRootFn override the read
@@ -547,6 +554,9 @@ func (c *MattermostClient) processEvents() {
 		case *mattermost.ChannelsViewedEvent:
 			c.handleChannelsViewed(evt)
 
+		case *mattermost.EphemeralEvent:
+			c.relayEphemeral(evt.Post)
+
 		case *mattermost.AuthErrorEvent:
 			c.UserLogin.BridgeState.Send(status.BridgeState{
 				StateEvent: status.StateBadCredentials,
@@ -722,8 +732,14 @@ func (c *MattermostClient) resolveDisplayName(userID string) string {
 	return c.displayName(fetched)
 }
 
-// sendNotice queues a notice m.text event into a channel portal.
+// sendNotice queues a plain-text notice from the bridge into a channel portal.
 func (c *MattermostClient) sendNotice(channelID networkid.PortalID, body string) {
+	c.queueNotice(channelID, "", body, false)
+}
+
+// queueNotice queues a notice from the bridge into a channel portal, in the
+// thread of post rootID when set. markdown renders text as Markdown.
+func (c *MattermostClient) queueNotice(channelID networkid.PortalID, rootID, body string, markdown bool) {
 	c.queueEvent(&simplevent.Message[string]{
 		EventMeta: simplevent.EventMeta{
 			Type:         bridgev2.RemoteEventMessage,
@@ -736,14 +752,22 @@ func (c *MattermostClient) sendNotice(channelID networkid.PortalID, body string)
 		ID:   networkid.MessageID(fmt.Sprintf("notice:%s:%d", channelID, time.Now().UnixMilli())),
 		Data: body,
 		ConvertMessageFunc: func(_ context.Context, _ *bridgev2.Portal, _ bridgev2.MatrixAPI, text string) (*bridgev2.ConvertedMessage, error) {
-			return &bridgev2.ConvertedMessage{Parts: []*bridgev2.ConvertedMessagePart{{
-				ID:   networkid.PartID(""),
-				Type: event.EventMessage,
-				Content: &event.MessageEventContent{
-					MsgType: event.MsgNotice,
-					Body:    text,
-				},
-			}}}, nil
+			content := &event.MessageEventContent{MsgType: event.MsgNotice, Body: text}
+			if markdown {
+				rendered := format.RenderMarkdown(text, true, false)
+				rendered.MsgType = event.MsgNotice
+				content = &rendered
+			}
+			converted := &bridgev2.ConvertedMessage{Parts: []*bridgev2.ConvertedMessagePart{{
+				ID:      networkid.PartID(""),
+				Type:    event.EventMessage,
+				Content: content,
+			}}}
+			if rootID != "" {
+				root := networkid.MessageID(rootID)
+				converted.ThreadRoot = &root
+			}
+			return converted, nil
 		},
 	})
 }

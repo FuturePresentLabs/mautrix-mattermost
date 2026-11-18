@@ -176,6 +176,13 @@ func (c *Client) parseEvent(raw []byte) {
 		}
 		c.Events <- &PostEditedEvent{Post: post, ChannelID: post.ChannelID}
 
+	case "ephemeral_message":
+		post := decodePost(env.Data, "post")
+		if post == nil {
+			return
+		}
+		c.Events <- &EphemeralEvent{Post: post}
+
 	case "post_deleted":
 		post := decodePost(env.Data, "post")
 		if post == nil {
