@@ -208,6 +208,7 @@ func TestTeamSpacesOffMovesChannelsOutAndDeletesSpaces(t *testing.T) {
 		queued = append(queued, ev)
 		return bridgev2.EventHandlingResultQueued
 	}
+	c.spaceChildrenFn = func(string) bool { return false }
 	c.syncTeams([]*mattermost.Team{{ID: "t1"}, {ID: "t2"}})
 	c.queueTeamResync(&mattermost.Team{ID: "t1"}) // e.g. update_team: nothing with spaces off
 	if len(queued) != 2 {
@@ -245,5 +246,27 @@ func TestGetChatInfoFollowsTeamSpacesSetting(t *testing.T) {
 		if err != nil || info.ParentID == nil || string(*info.ParentID) != want {
 			t.Fatalf("team_spaces=%v: parent = %v err=%v, want %q", on, info.ParentID, err, want)
 		}
+	}
+}
+
+func TestSpaceWithRoomsInsideIsNotDeleted(t *testing.T) {
+	c := teamClient("http://unused")
+	c.teamSpacesFn = func() bool { return false }
+	c.spaceChildrenFn = func(id string) bool { return id == "t1" }
+	var queued []bridgev2.RemoteEvent
+	c.queueRemoteEventFn = func(ev bridgev2.RemoteEvent) bridgev2.EventHandlingResult {
+		queued = append(queued, ev)
+		return bridgev2.EventHandlingResultQueued
+	}
+	c.syncTeams([]*mattermost.Team{{ID: "t1"}, {ID: "t2"}})
+	if len(queued) != 1 || queued[0].GetPortalKey().ID != "team:t2" {
+		t.Fatalf("queued %v, want only the empty space t2 deleted", queued)
+	}
+	// No database to ask: delete nothing.
+	c.spaceChildrenFn = nil
+	queued = nil
+	c.syncTeams([]*mattermost.Team{{ID: "t3"}})
+	if len(queued) != 0 {
+		t.Fatalf("deleted %v without knowing whether rooms are inside", queued)
 	}
 }

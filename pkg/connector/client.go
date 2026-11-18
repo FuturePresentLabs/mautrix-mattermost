@@ -109,6 +109,8 @@ type MattermostClient struct {
 	// network.team_spaces in tests (teams.go).
 	getTeamFn    func(teamID string) (*mattermost.Team, error)
 	teamSpacesFn func() bool
+	// spaceChildrenFn overrides the "rooms still in this space" check.
+	spaceChildrenFn func(teamID string) bool
 
 	// viewedAt is how far each channel is known read (see readsync.go).
 	// Guarded by mu.
