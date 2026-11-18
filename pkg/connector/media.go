@@ -51,12 +51,9 @@ func (c *MattermostClient) convertPost(ctx context.Context, intent bridgev2.Matr
 	var parts []*bridgev2.ConvertedMessagePart
 	replyTo, threadRoot := threadRelation(post)
 
-	// Preserve Mattermost's lifecycle system post verbatim as a notice.
-	if post.Type == "system_channel_deleted" || post.Type == "system_channel_restored" {
-		return &bridgev2.ConvertedMessage{Parts: []*bridgev2.ConvertedMessagePart{{
-			Type:    event.EventMessage,
-			Content: &event.MessageEventContent{MsgType: event.MsgNotice, Body: post.Message},
-		}}}, nil
+	// Server messages (joins, adds, renames, lifecycle) are notices.
+	if post.IsSystem() {
+		return systemNotice(post), nil
 	}
 
 	// Convert file attachments.
@@ -137,6 +134,7 @@ func (c *MattermostClient) convertPost(ctx context.Context, intent bridgev2.Matr
 			firstContent := parts[0].Content
 			firstContent.FileName = firstContent.Body
 			rendered := c.renderPostText(ctx, text)
+			firstContent.BeeperLinkPreviews = c.linkPreviews(ctx, intent, roomID, post)
 			firstContent.Mentions = rendered.Mentions
 			firstContent.Body = rendered.Body
 			if rendered.FormattedBody != "" {
@@ -147,6 +145,7 @@ func (c *MattermostClient) convertPost(ctx context.Context, intent bridgev2.Matr
 		} else {
 			// Text-only message.
 			textContent := c.renderPostText(ctx, text)
+			textContent.BeeperLinkPreviews = c.linkPreviews(ctx, intent, roomID, post)
 			// Quote linked Mattermost posts under the link. Best effort: the
 			// message is sent either way.
 			c.attachPermalinkQuotes(ctx, &textContent, text)

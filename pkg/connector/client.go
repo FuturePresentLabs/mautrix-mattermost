@@ -136,6 +136,8 @@ type MattermostClient struct {
 	// Test hooks for mutes.
 	membershipsFn func(teamID string) ([]*mattermost.ChannelMember, error)
 	muteRoomFn    func(channelID string, until time.Time) bool
+	// fetchPreviewImageFn overrides downloading link preview images.
+	fetchPreviewImageFn func(src string) ([]byte, string, error)
 	// clearSpaceParentsFn overrides unlinking rooms from a team space.
 	clearSpaceParentsFn func(teamID string)
 	// viewChannelFn, markThreadReadFn and threadRootFn override the read
@@ -347,14 +349,7 @@ func (c *MattermostClient) processEvents() {
 				}
 				c.mu.Unlock()
 			}
-			isFromMe := c.UserID != "" && evt.Post.UserID == c.UserID
-			sender := bridgev2.EventSender{
-				Sender:   networkid.UserID(evt.Post.UserID),
-				IsFromMe: isFromMe,
-			}
-			if isFromMe {
-				sender.SenderLogin = c.UserLogin.ID
-			}
+			sender := c.postSender(evt.Post)
 			c.queueEvent(&simplevent.Message[*mattermost.Post]{
 				EventMeta: simplevent.EventMeta{
 					Type:         bridgev2.RemoteEventMessage,

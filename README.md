@@ -218,6 +218,30 @@ Mattermost, and viewing a channel in Mattermost marks it read in Matrix. Matterm
 only mark a channel read up to the present, so a message arriving in the second between
 your client showing a room and the bridge passing on the receipt is marked read as well.
 
+## Link previews and server messages
+
+Link previews Mattermost made for a message (title, description, site and
+image) are sent with it as bundled previews (`com.beeper.linkpreviews`), so
+clients that support them show the preview without fetching the page. The
+bridge downloads the image (http or https, up to 5 MB) and uploads it; if that
+fails, the preview is sent without an image.
+
+Mattermost's own messages, such as "alice joined the channel" or "bob added to
+the channel by alice", come from the bridge bot as notices, not from the person
+they name.
+
+## Loading older history
+
+Clients such as Beeper load older messages on demand when you scroll back. The
+bridge supports this, but the framework keeps it off by default; turn it on in
+the bridge config:
+
+```yaml
+backfill:
+    queue:
+        manual: true
+```
+
 ## Mutes
 
 Channels you mute in Mattermost ("Mute channel") are muted in Matrix too:
