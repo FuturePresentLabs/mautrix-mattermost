@@ -111,6 +111,12 @@ type MattermostClient struct {
 	teamSpacesFn func() bool
 	// spaceChildrenFn overrides the "rooms still in this space" check.
 	spaceChildrenFn func(teamID string) bool
+	// uploadTeamIconFn, setSpaceStateFn, saveLoginFn and hasPortalFn override
+	// the team login upkeep's side effects in tests (teamlogin_sync.go).
+	uploadTeamIconFn func(team *mattermost.Team) (id.ContentURIString, error)
+	setSpaceStateFn  func(evtType event.Type, content any)
+	saveLoginFn      func()
+	hasPortalFn      func(channelID string) bool
 
 	// viewedAt is how far each channel is known read (see readsync.go).
 	// Guarded by mu.
@@ -170,6 +176,11 @@ func (c *MattermostClient) serverURL() string {
 
 // queueChannelResync queues a ChatResync event for a single Mattermost channel.
 func (c *MattermostClient) queueChannelResync(ch *mattermost.Channel) {
+	// Only this login's channels get rooms here (teamlogin.go). Every path
+	// that creates a channel room goes through this.
+	if !c.ownsChannel(ch) {
+		return
+	}
 	c.queueEvent(c.channelResyncEvent(ch))
 }
 
@@ -291,7 +302,7 @@ func (c *MattermostClient) processEvents() {
 			go c.syncChannels()
 
 		case *mattermost.PostedEvent:
-			if evt.Post == nil {
+			if evt.Post == nil || !c.ownsPost(evt) {
 				continue
 			}
 			// Restores arrive as a system post; treat it as proof the channel is
@@ -439,7 +450,7 @@ func (c *MattermostClient) processEvents() {
 			c.handleStatusChange(evt)
 
 		case *mattermost.ChannelCreatedEvent:
-			if evt.Channel == nil {
+			if evt.Channel == nil || !c.ownsChannel(evt.Channel) {
 				continue
 			}
 			c.mu.Lock()
@@ -502,6 +513,9 @@ func (c *MattermostClient) processEvents() {
 			c.handleChannelMemberEvent(evt)
 
 		case *mattermost.DirectAddedEvent:
+			if !c.ownsDMs() {
+				continue
+			}
 			// A new DM was opened. Fetch channel info and queue a resync.
 			go func(chanID string) {
 				ch, err := mattermost.GetChannel(c.serverURL(), c.Token, chanID)
@@ -565,10 +579,14 @@ func (c *MattermostClient) syncChannels() {
 	}
 
 	seenChannels := make(map[string]bool)
+	foreign := make(map[string]bool) // listed, but bridged by another login
 	listingComplete := true
 
+	c.pinLegacyLogin(teams)
+	c.syncLoginProfile(teams)
+
 	// Spaces first, so channels have their parent space when they sync.
-	c.syncTeams(teams)
+	c.syncTeams(c.ownTeams(teams))
 
 	for _, team := range teams {
 		channels, err := mattermost.GetChannelsForUser(c.serverURL(), c.Token, c.UserID, team.ID)
@@ -577,16 +595,25 @@ func (c *MattermostClient) syncChannels() {
 			continue
 		}
 
+		var owned []*mattermost.Channel
+		for _, ch := range channels {
+			if c.ownsChannel(ch) {
+				owned = append(owned, ch)
+			} else {
+				foreign[ch.ID] = true
+			}
+		}
+
 		c.mu.Lock()
 		if c.channels == nil {
-			c.channels = make(map[string]*mattermost.Channel, len(channels))
+			c.channels = make(map[string]*mattermost.Channel, len(owned))
 		}
-		for _, ch := range channels {
+		for _, ch := range owned {
 			c.channels[ch.ID] = ch
 		}
 		c.mu.Unlock()
 
-		for _, ch := range channels {
+		for _, ch := range owned {
 			if seenChannels[ch.ID] {
 				continue // DMs appear in multiple teams
 			}
@@ -594,6 +621,13 @@ func (c *MattermostClient) syncChannels() {
 			c.queueChannelResync(ch)
 			c.queueAccessSync(ch.ID)
 		}
+	}
+
+	// Rooms this login has for other logins' channels (made before teams
+	// were per login) are removed; the owning login has its own.
+	c.removeForeignPortals(foreign)
+	for id := range foreign {
+		seenChannels[id] = true // not this login's to reconcile
 	}
 
 	// Mattermost's channel listing omits archived channels, so their rooms are

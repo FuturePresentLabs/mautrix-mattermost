@@ -112,6 +112,9 @@ func (c *MattermostClient) listChannels() (map[string]*mattermost.Channel, bool)
 			return nil, false
 		}
 		for _, ch := range channels {
+			if !c.ownsChannel(ch) {
+				continue // another login's channel (teamlogin.go)
+			}
 			if _, seen := out[ch.ID]; !seen { // DMs appear in every team
 				out[ch.ID] = ch
 			}
