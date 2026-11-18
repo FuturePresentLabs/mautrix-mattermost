@@ -81,17 +81,42 @@ func (c *MattermostClient) roomParent(ch *mattermost.Channel) *networkid.PortalI
 
 // syncTeams creates or updates the team spaces, or with team spaces off
 // deletes any left from when they were on (a delete for a space that was
-// never created is ignored).
+// never created is ignored). A space is deleted only once no room has it as
+// parent: rooms leave it through their own resyncs, which run on other
+// queues, and deleting a parent first fails. The next sync retries.
 func (c *MattermostClient) syncTeams(teams []*mattermost.Team) {
 	for _, team := range teams {
 		if c.teamSpacesEnabled() {
 			c.queueTeamResync(team)
 			continue
 		}
+		if c.spaceHasChildren(team.ID) {
+			continue
+		}
 		c.queueEvent(&mmChatDeleteEvent{
 			portalKey: networkid.PortalKey{ID: teamPortalID(team.ID), Receiver: c.UserLogin.ID},
 		})
 	}
+}
+
+// spaceHasChildren reports whether any room still has the team space as
+// parent. When the database cannot be asked, it says yes, so nothing is
+// deleted on a guess.
+func (c *MattermostClient) spaceHasChildren(teamID string) bool {
+	if c.spaceChildrenFn != nil {
+		return c.spaceChildrenFn(teamID)
+	}
+	if c.UserLogin == nil || c.UserLogin.Bridge == nil || c.UserLogin.Bridge.DB == nil {
+		return true
+	}
+	// The parent key has a receiver only with split portals; check both.
+	for _, receiver := range []networkid.UserLoginID{c.UserLogin.ID, ""} {
+		children, err := c.UserLogin.Bridge.DB.Portal.GetChildren(context.Background(), networkid.PortalKey{ID: teamPortalID(teamID), Receiver: receiver})
+		if err != nil || len(children) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // teamInfo is a team space's room info: the team's name and icon, the user
