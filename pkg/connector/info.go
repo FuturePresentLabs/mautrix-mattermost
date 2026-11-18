@@ -45,8 +45,7 @@ func (c *MattermostClient) GetChatInfo(ctx context.Context, portal *bridgev2.Por
 			roomType = database.RoomTypeGroupDM
 		}
 
-		if ch.DisplayName != "" {
-			n := ch.DisplayName
+		if n := c.channelTitle(ch); n != "" {
 			name = &n
 		}
 	}

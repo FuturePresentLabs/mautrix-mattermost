@@ -196,6 +196,9 @@ Each Mattermost team is a separate login, so clients that group and filter by ac
 after the team and uses the team icon. Log in once per team with the same credentials;
 when you belong to more than one team, the login asks which team to bridge.
 
+When your account is in more than one team, team channels are named with their team,
+such as `Town Square · Example`, since a client may show every login with the same icon.
+
 DMs and group DMs belong to no team, so exactly one of your logins carries them: your
 first login, unless you choose another with `dm-team <team>` in the bridge's management
 room (`dm-team` alone lists your logins). Moving them recreates the DM rooms under the
