@@ -1,0 +1,12 @@
+[Unit]
+Description=Update the mautrix-mattermost Shroud microVM from Docker Hub
+After=shroud.service network-online.target
+Wants=shroud.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mautrix-mattermost-update
+TimeoutStartSec=600
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

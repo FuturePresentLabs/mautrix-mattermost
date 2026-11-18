@@ -63,6 +63,17 @@ Building for a different architecture from a Mac needs the matching SDK or toolc
 GOARCH=amd64 CGO_ENABLED=1 ./build.sh
 ```
 
+### Docker or a Shroud microVM
+
+The repository ships a `Dockerfile` that is also a valid Shroud rootfs: config,
+registration and the SQLite database live under `/data/mautrix-mattermost`, and
+the entrypoint runs without an init system. See [deploy/shroud.md](deploy/shroud.md)
+for the rootfs build, persistent volume layout, and deployment request.
+
+```sh
+docker build -t mautrix-mattermost .
+```
+
 ## Setup
 
 ### With Beeper / bbctl
