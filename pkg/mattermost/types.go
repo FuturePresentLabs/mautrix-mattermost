@@ -274,6 +274,12 @@ type HelloEvent struct {
 	ServerVersion string `json:"server_version"`
 }
 
+// EphemeralEvent carries a post shown only to this user and never stored,
+// such as a slash command's reply.
+type EphemeralEvent struct {
+	Post *Post
+}
+
 // PostedEvent carries a newly created post.
 type PostedEvent struct {
 	Post      *Post

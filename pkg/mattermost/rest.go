@@ -33,6 +33,8 @@ type HTTPError struct {
 	// ErrorID is Mattermost's machine-readable error id from the JSON body
 	// ("id"), empty when the body is absent or not JSON.
 	ErrorID string
+	// Message is Mattermost's human-readable error ("message"), if any.
+	Message string
 	// BodyStatusCode is the status_code declared inside the JSON body, 0 when
 	// absent or undecodable. It must be consistent with StatusCode whenever it
 	// is used as evidence.
@@ -61,6 +63,25 @@ func (e *HTTPError) IsAuthoritativeChannelNotFound(channelID string) bool {
 		return false
 	}
 	return true
+}
+
+// newHTTPError reads a failed response into an HTTPError. Mattermost error
+// bodies are JSON ({"id": ..., "message": ..., "status_code": ...}); the id and
+// status let callers classify failures without parsing text.
+func newHTTPError(resp *http.Response, path string) *HTTPError {
+	body, _ := io.ReadAll(resp.Body)
+	httpErr := &HTTPError{StatusCode: resp.StatusCode, Path: path, Body: string(body)}
+	var payload struct {
+		ID         string `json:"id"`
+		Message    string `json:"message"`
+		StatusCode int    `json:"status_code"`
+	}
+	if json.Unmarshal(body, &payload) == nil {
+		httpErr.ErrorID = payload.ID
+		httpErr.Message = payload.Message
+		httpErr.BodyStatusCode = payload.StatusCode
+	}
+	return httpErr
 }
 
 func (e *HTTPError) Error() string {
@@ -390,19 +411,7 @@ func doGet(serverURL, token, path string, out any) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		httpErr := &HTTPError{StatusCode: resp.StatusCode, Path: path, Body: string(body)}
-		// Mattermost error bodies are JSON ({"id": ..., "message": ..., "status_code": ...}).
-		// Record the id/status so callers can classify failures without parsing text.
-		var payload struct {
-			ID         string `json:"id"`
-			StatusCode int    `json:"status_code"`
-		}
-		if json.Unmarshal(body, &payload) == nil {
-			httpErr.ErrorID = payload.ID
-			httpErr.BodyStatusCode = payload.StatusCode
-		}
-		return httpErr
+		return newHTTPError(resp, path)
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
@@ -459,8 +468,7 @@ func doPost(serverURL, token, path string, body any, out any) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		errBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("HTTP %d from %s: %s", resp.StatusCode, path, string(errBody))
+		return newHTTPError(resp, path)
 	}
 	if out != nil {
 		return json.NewDecoder(resp.Body).Decode(out)

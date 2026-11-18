@@ -218,6 +218,28 @@ Mattermost, and viewing a channel in Mattermost marks it read in Matrix. Matterm
 only mark a channel read up to the present, so a message arriving in the second between
 your client showing a room and the bridge passing on the receipt is marked read as well.
 
+## Slash commands
+
+A message from Matrix that starts with a slash command you can run in Mattermost,
+such as `/away`, `/dnd`, `/header New topic` or a plugin's `/meet start`, runs
+the command in that channel (or thread) instead of being posted, as typing it in
+Mattermost does. The bridge asks Mattermost which commands exist in the team, so
+plugin commands work too.
+
+- Replies only you can see (for example "You are now away") appear as notices
+  from the bridge. Their formatting and links carry over; buttons only work in
+  Mattermost.
+- Anything else starting with `/` is posted as text, so `/usr/bin is full` is
+  not swallowed. To post text that starts with a command, begin it with `//`:
+  `//away` posts "/away".
+- Your command stays in the Matrix room as your record. It has no Mattermost
+  post, so it cannot be edited or reacted to; deleting it only removes it from
+  Matrix.
+- If Mattermost refuses a command, its error is shown on the failed message.
+
+Some Matrix clients handle a few commands themselves (`/me`, `/shrug`); those
+never reach the bridge.
+
 ## About this fork
 
 This fork tracks upstream and carries the changes below. They are also open as upstream pull requests, so some or all of them may eventually be merged there.

@@ -69,6 +69,9 @@ func outboundRootID(msg *bridgev2.MatrixMessage) string {
 		return ""
 	}
 	for _, target := range []*database.Message{msg.ThreadRoot, msg.ReplyTo} {
+		if target != nil && isCommandMessage(target.ID) && target.ThreadRoot == "" {
+			continue // a command has no post to reply to
+		}
 		if target != nil {
 			if target.ThreadRoot != "" {
 				return string(target.ThreadRoot)
@@ -103,6 +106,11 @@ func (c *MattermostClient) HandleMatrixMessage(ctx context.Context, msg *bridgev
 	case event.MsgText, event.MsgNotice, event.MsgEmote:
 		// Markdown for Mattermost, with mention pills as "@username".
 		body := c.outboundMarkdown(ctx, content)
+		if escaped, ok := escapedSlash(body); ok {
+			body = escaped
+		} else if resp, handled, err := c.handleSlashCommand(ctx, msg, channelID, rootID, body); handled {
+			return resp, err
+		}
 		if content.MsgType == event.MsgEmote {
 			body = "_" + body + "_"
 		}
@@ -190,6 +198,9 @@ func (c *MattermostClient) HandleMatrixEdit(ctx context.Context, msg *bridgev2.M
 	if msg.Content.NewContent != nil {
 		src = msg.Content.NewContent
 	}
+	if isCommandMessage(msg.EditTarget.ID) {
+		return wrapSendErr(errCommandMessage)
+	}
 	newBody := c.outboundMarkdown(ctx, src)
 
 	return wrapSendErr(mattermost.EditPost(c.serverURL(), c.Token, string(msg.EditTarget.ID), newBody))
@@ -203,11 +214,17 @@ func (c *MattermostClient) HandleMatrixMessageRemove(ctx context.Context, msg *b
 	if cl == nil {
 		return fmt.Errorf("not connected to Mattermost")
 	}
+	if isCommandMessage(msg.TargetMessage.ID) {
+		return nil // nothing in Mattermost; the Matrix copy is just removed
+	}
 	return mattermost.DeletePost(c.serverURL(), c.Token, string(msg.TargetMessage.ID))
 }
 
 // PreHandleMatrixReaction validates and extracts the emoji name.
 func (c *MattermostClient) PreHandleMatrixReaction(ctx context.Context, msg *bridgev2.MatrixReaction) (bridgev2.MatrixReactionPreResponse, error) {
+	if msg.TargetMessage != nil && isCommandMessage(msg.TargetMessage.ID) {
+		return bridgev2.MatrixReactionPreResponse{}, wrapSendErr(errCommandMessage)
+	}
 	unicode := msg.Content.RelatesTo.Key
 	shortcode := unicodeToMMEmoji(unicode)
 	return bridgev2.MatrixReactionPreResponse{
