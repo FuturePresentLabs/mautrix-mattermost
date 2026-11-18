@@ -21,3 +21,9 @@ network:
     #   dnd  - only do not disturb: alice ⛔
     #   off  - plain names
     dm_status: all
+
+    # Put each Mattermost team's channels in a Matrix space named and pictured like
+    # the team. Off by default: Beeper's per-account inbox filters (such as showing
+    # only DMs) do not apply to rooms inside these spaces. Turning it off moves the
+    # channels back out and removes the team spaces.
+    team_spaces: false

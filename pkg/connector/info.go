@@ -70,7 +70,7 @@ func (c *MattermostClient) GetChatInfo(ctx context.Context, portal *bridgev2.Por
 		Members: members,
 	}
 	if ok {
-		info.ParentID = channelParent(ch)
+		info.ParentID = c.roomParent(ch)
 	}
 	// A DM is titled after the other person, with their status (dmstatus.go).
 	if ok {
