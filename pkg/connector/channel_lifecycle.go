@@ -42,7 +42,7 @@ import (
 //  6. Two bridge configurations are refused outright because the dequeue
 //     decision can no longer be ordered against restores on this lane:
 //     AsyncEvents=true (per-portal events run concurrently and out of order)
-//     and bridgev2.PortalEventBuffer==0 (events are handled inline in the
+//     and bridge.portal_event_buffer==0 (events are handled inline in the
 //     caller's goroutine). In both cases the portal is preserved.
 //
 // Residual risk, stated plainly: this is not a proof of safety. A restore that
@@ -183,7 +183,7 @@ func (c *MattermostClient) deferredDeletionSupported() (bool, string) {
 		// queued after this check can be handled before it (or concurrently).
 		return false, "async-events-unsupported"
 	}
-	if bridgev2.PortalEventBuffer == 0 {
+	if c.UserLogin.Bridge.Config.PortalEventBuffer == 0 {
 		// Events are handled inline in whatever goroutine queued them, which
 		// removes the lane boundary this design relies on.
 		return false, "portal-event-buffer-inline"
