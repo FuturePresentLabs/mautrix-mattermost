@@ -94,6 +94,7 @@ func (c *MattermostClient) markThreadRead(ctx context.Context, channelID string,
 	if upTo.IsZero() {
 		upTo = c.now()
 	}
+	c.noteThreadRead(rootID, upTo) // the read coming back is not sent again
 	if c.markThreadReadFn != nil {
 		return c.markThreadReadFn(teamID, rootID, upTo.UnixMilli())
 	}
@@ -135,5 +136,6 @@ func (c *MattermostClient) handleChannelsViewed(evt *mattermost.ChannelsViewedEv
 			},
 			ReadUpTo: t,
 		})
+		c.readChannelThreads(channelID, t)
 	}
 }

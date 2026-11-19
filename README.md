@@ -220,6 +220,18 @@ and uses its icon. Exactly one of the logins carries the DMs: your first, unless
 choose another with `dm-team <team>` (`dm-team` alone lists them). A login made before
 logins had teams is pinned to your first team by name on its next connect.
 
+## Thread reads
+
+Matrix keeps a read marker per thread, so the bridge marks threads read as well as rooms:
+
+- Reading a thread in Mattermost marks it read in Matrix (and the other way round).
+- When your Mattermost shows replies inline in the channel (collapsed reply threads off,
+  for the server or for you), viewing a channel there also marks its threads read.
+- On connect, threads Mattermost already has as read are marked read in Matrix.
+
+This clears thread unread counts (such as Beeper's Unread threads) for threads you read in
+Mattermost.
+
 ## Replies
 
 Mattermost replies are threads. With the [Channel Reply](https://github.com/Azario16/mattermost-plugin-channel-reply)

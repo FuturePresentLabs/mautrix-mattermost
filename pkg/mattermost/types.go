@@ -270,6 +270,8 @@ type ChannelMember struct {
 	UserID      string            `json:"user_id"`
 	Roles       string            `json:"roles"`
 	NotifyProps map[string]string `json:"notify_props,omitempty"`
+	// LastViewedAt is when the user last viewed the channel (ms).
+	LastViewedAt int64 `json:"last_viewed_at,omitempty"`
 }
 
 // Reaction is an emoji reaction attached to a post.
@@ -422,6 +424,14 @@ type TeamUpdatedEvent struct {
 // (the server did not say).
 type ChannelsViewedEvent struct {
 	Times map[string]int64
+}
+
+// ThreadReadEvent is a collapsed reply thread read by the user
+// ("thread_read_changed"), up to Timestamp (ms).
+type ThreadReadEvent struct {
+	ThreadID  string
+	ChannelID string
+	Timestamp int64
 }
 
 // AuthErrorEvent signals the WS auth was rejected or a session was invalidated.
