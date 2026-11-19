@@ -225,8 +225,8 @@ logins had teams is pinned to your first team by name on its next connect.
 Matrix keeps a read marker per thread, so the bridge marks threads read as well as rooms:
 
 - Reading a thread in Mattermost marks it read in Matrix (and the other way round).
-- When your Mattermost shows replies inline in the channel (collapsed reply threads off,
-  for the server or for you), viewing a channel there also marks its threads read.
+- Viewing a channel in Mattermost marks its threads read, except threads Mattermost counts
+  as unread (with collapsed reply threads on, only followed threads can be unread there).
 - On connect, threads Mattermost already has as read are marked read in Matrix.
 
 This clears thread unread counts (such as Beeper's Unread threads) for threads you read in

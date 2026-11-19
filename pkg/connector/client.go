@@ -143,6 +143,7 @@ type MattermostClient struct {
 	collapsedThreadsFn func() bool
 	threadRootsFn      func(channelID string, since time.Time) []string
 	userThreadsFn      func(teamID string) ([]*mattermost.UserThread, error)
+	unreadThreadsFn    func(teamID string) ([]string, error)
 	muteRoomFn         func(channelID string, until time.Time) bool
 	// Test hooks for account logins (teamtoggle.go).
 	accountLoginsFn func() bool

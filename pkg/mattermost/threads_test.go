@@ -127,3 +127,23 @@ func TestGetUserThreadsStopsAtTotal(t *testing.T) {
 		t.Fatalf("%d threads, %d calls, %v", len(got), calls, err)
 	}
 }
+
+func TestGetUnreadThreadIDs(t *testing.T) {
+	var query string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.RawQuery
+		_ = json.NewEncoder(w).Encode(map[string]any{"total": 2, "threads": []map[string]any{{"id": "a"}, {"id": ""}, {"id": "b"}}})
+	}))
+	defer srv.Close()
+	ids, err := GetUnreadThreadIDs(srv.URL, "tok", "tm")
+	if err != nil || strings.Join(ids, ",") != "a,b" || !strings.Contains(query, "unread=true") {
+		t.Fatalf("%v %v %q", ids, err, query)
+	}
+	if _, err := GetUnreadThreadIDs("http://127.0.0.1:1", "tok", "tm"); err == nil {
+		t.Fatal("error swallowed")
+	}
+	_, _ = GetUserThreads(srv.URL, "tok", "tm")
+	if strings.Contains(query, "unread") {
+		t.Fatal("followed threads filtered to unread")
+	}
+}
