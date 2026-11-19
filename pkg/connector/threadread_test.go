@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 
 	"github.com/bostrot/mautrix-mattermost/pkg/mattermost"
@@ -233,5 +234,28 @@ func TestReceiptsStampedWhenSent(t *testing.T) {
 	}
 	if got := c.receiptTime(dmNow.Add(time.Minute)); !got.Equal(dmNow.Add(time.Minute)) {
 		t.Fatalf("future read stamped %v", got)
+	}
+}
+
+func TestRoomReceiptTargetsMainTimeline(t *testing.T) {
+	c, _ := threadReadClient(t, true)
+	c.unreadThreadsFn = func(string) ([]string, error) { return nil, nil }
+	var asked time.Time
+	c.lastMainMessageFn = func(ch string, at time.Time) networkid.MessageID { asked = at; return "main1" }
+	var targets []string
+	c.queueRemoteEventFn = func(ev bridgev2.RemoteEvent) bridgev2.EventHandlingResult {
+		r := ev.(*simplevent.Receipt)
+		targets = append(targets, string(r.ThreadRoot)+">"+string(r.LastTarget))
+		return bridgev2.EventHandlingResultQueued
+	}
+	ts := int64(1794950000000)
+	c.handleChannelsViewed(&mattermost.ChannelsViewedEvent{Times: map[string]int64{"chan": ts}})
+	if len(targets) == 0 || targets[0] != ">main1" || !asked.Equal(time.UnixMilli(ts)) {
+		t.Fatalf("targets %v asked %v", targets, asked)
+	}
+	for _, tg := range targets[1:] {
+		if strings.HasSuffix(tg, ">main1") {
+			t.Fatalf("thread receipt given the room target: %v", targets)
+		}
 	}
 }

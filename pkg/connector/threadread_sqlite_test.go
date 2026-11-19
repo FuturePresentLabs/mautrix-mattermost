@@ -54,4 +54,29 @@ func TestThreadRootsQuerySQLite(t *testing.T) {
 	if strings.Join(got, ",") != "rootA,rootB" {
 		t.Fatalf("roots %v", got)
 	}
+	// The room receipt targets the last message outside threads.
+	add("ch1", "me", "", now.Add(-3*time.Hour)) // older main message
+	add("ch1", "other", "", now.Add(-time.Hour)) // another login's room
+	add("ch1", "me", "", now.Add(time.Hour)) // after the read
+	mainNow := c.lastMainMessage("ch1", now)
+	var want string
+	if err := db.QueryRow(t.Context(), "SELECT id FROM message WHERE room_id='ch1' AND room_receiver='me' AND thread_root_id IS NULL AND timestamp=$1", now.UnixNano()).Scan(&want); err != nil {
+		t.Fatal(err)
+	}
+	if string(mainNow) != want {
+		t.Fatalf("main target %q, want %q", mainNow, want)
+	}
+	var older string
+	if err := db.QueryRow(t.Context(), "SELECT id FROM message WHERE room_id='ch1' AND room_receiver='me' AND thread_root_id IS NULL AND timestamp=$1", now.Add(-3*time.Hour).UnixNano()).Scan(&older); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.lastMainMessage("ch1", now.Add(-30*time.Minute)); string(got) != older {
+		t.Fatalf("target %q, want this login's %q", got, older)
+	}
+	if got := c.lastMainMessage("ch1", now.Add(-4*time.Hour)); got != "" {
+		t.Fatalf("target before any main message: %q", got)
+	}
+	if got := c.lastMainMessage("ch2", now); got != "" {
+		t.Fatalf("thread-only room got a main target %q", got)
+	}
 }
