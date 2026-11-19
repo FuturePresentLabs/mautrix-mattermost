@@ -18,12 +18,14 @@ import (
 // user has read in Mattermost as unread. Three paths send thread receipts:
 //
 //   - A thread read in Mattermost ("thread_read_changed").
-//   - With collapsed reply threads off for the user, replies show inline in
-//     the channel, so viewing the channel reads its threads: each thread of
-//     the room with messages is marked read up to the view.
+//   - Viewing a channel marks the room's threads read up to the view, except
+//     threads Mattermost counts as unread. With collapsed reply threads off
+//     the replies were shown inline, so all of them are read; with them on,
+//     Mattermost only counts followed threads as unread, so a thread it does
+//     not count is not left unread in Matrix either.
 //   - On connect, a catch-up: followed threads with no unread replies are
-//     marked read up to when they were viewed, and with collapsed threads
-//     off, each channel's threads up to when the channel was viewed.
+//     marked read up to when they were viewed, and each channel's threads as
+//     for a view of the channel at its last view.
 //
 // A thread already marked read up to a point is not marked again, which also
 // stops the receipt for a read made in Matrix coming back from Mattermost.
@@ -88,15 +90,46 @@ func (c *MattermostClient) bridgesChannel(channelID string) bool {
 	return ch != nil && c.ownsChannel(ch)
 }
 
-// readChannelThreads marks the room's threads read up to t, when the user
-// reads threads inline (collapsed threads off).
+// readChannelThreads marks the room's threads read up to t, except, with
+// collapsed threads on, those Mattermost counts as unread. When that count
+// cannot be read, nothing is marked: threads then clear when read as threads.
 func (c *MattermostClient) readChannelThreads(channelID string, t time.Time) {
+	var unread map[string]bool
 	if c.collapsedThreads() {
-		return
+		var ok bool
+		if unread, ok = c.unreadThreads(c.teamForChannel(channelID)); !ok {
+			return
+		}
 	}
 	for _, root := range c.threadRoots(channelID, t.Add(-threadLookback)) {
-		c.queueThreadReceipt(channelID, root, t)
+		if !unread[root] {
+			c.queueThreadReceipt(channelID, root, t)
+		}
 	}
+}
+
+// unreadThreads is the set of threads Mattermost counts as unread in a team.
+func (c *MattermostClient) unreadThreads(teamID string) (map[string]bool, bool) {
+	if teamID == "" {
+		return nil, false
+	}
+	var ids []string
+	var err error
+	if c.unreadThreadsFn != nil {
+		ids, err = c.unreadThreadsFn(teamID)
+	} else {
+		ids, err = mattermost.GetUnreadThreadIDs(c.serverURL(), c.Token, teamID)
+	}
+	if err != nil {
+		lg := c.lifecycleLogger()
+		lg.Warn().Err(err).Str("team_id", teamID).Msg("Could not list unread threads")
+		return nil, false
+	}
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out, true
 }
 
 // threadRoots lists the roots of the room's threads with messages since.
@@ -181,7 +214,7 @@ func (c *MattermostClient) catchUpThreadReads(teams []*mattermost.Team) {
 			c.queueThreadReceipt(th.Post.ChannelID, th.ID, time.UnixMilli(th.LastViewedAt))
 		}
 	}
-	for channelID, viewed := range c.channelViews() { // readChannelThreads checks collapsed threads
+	for channelID, viewed := range c.channelViews() {
 		if viewed > 0 && c.bridgesChannel(channelID) {
 			c.readChannelThreads(channelID, time.UnixMilli(viewed))
 		}

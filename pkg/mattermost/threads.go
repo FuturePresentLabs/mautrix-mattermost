@@ -26,13 +26,33 @@ const maxThreadPages = 5
 // GetUserThreads lists the threads the user follows in a team, newest
 // activity first, up to maxThreadPages pages of 100.
 func GetUserThreads(serverURL, token, teamID string) ([]*UserThread, error) {
+	return getUserThreads(serverURL, token, teamID, "")
+}
+
+// GetUnreadThreadIDs lists the root post IDs of the threads Mattermost
+// counts as unread for the user in a team.
+func GetUnreadThreadIDs(serverURL, token, teamID string) ([]string, error) {
+	threads, err := getUserThreads(serverURL, token, teamID, "&unread=true")
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(threads))
+	for _, th := range threads {
+		if th != nil && th.ID != "" {
+			ids = append(ids, th.ID)
+		}
+	}
+	return ids, nil
+}
+
+func getUserThreads(serverURL, token, teamID, filter string) ([]*UserThread, error) {
 	var out []*UserThread
 	for page := 0; page < maxThreadPages; page++ {
 		var resp struct {
 			Total   int64         `json:"total"`
 			Threads []*UserThread `json:"threads"`
 		}
-		path := fmt.Sprintf("/api/v4/users/me/teams/%s/threads?per_page=100&page=%d", teamID, page)
+		path := fmt.Sprintf("/api/v4/users/me/teams/%s/threads?per_page=100&page=%d%s", teamID, page, filter)
 		if err := doGet(serverURL, token, path, &resp); err != nil {
 			return nil, err
 		}

@@ -30,6 +30,12 @@ func threadReadClient(t *testing.T, collapsed bool) (*MattermostClient, *[]strin
 		}
 		return []string{"z"} // other rooms: must never be asked for
 	}
+	c.unreadThreadsFn = func(team string) ([]string, error) {
+		if team != "teamB" {
+			t.Errorf("unread threads asked for team %q", team)
+		}
+		return []string{"r2"}, nil // Mattermost counts r2 as unread
+	}
 	var got []string
 	c.queueRemoteEventFn = func(ev bridgev2.RemoteEvent) bridgev2.EventHandlingResult {
 		r := ev.(*simplevent.Receipt)
@@ -84,10 +90,22 @@ func TestChannelViewReadsThreadsWhenInline(t *testing.T) {
 	if strings.Join(*got, ",") != "chan@"+at(ts)+",chan/r1@"+at(ts)+",chan/r2@"+at(ts) {
 		t.Fatalf("inline: %v", *got)
 	}
+	// Collapsed: threads Mattermost counts as unread stay unread.
 	c2, got2 := threadReadClient(t, true)
 	c2.handleChannelsViewed(&mattermost.ChannelsViewedEvent{Times: map[string]int64{"chan": ts}})
-	if strings.Join(*got2, ",") != "chan@"+at(ts) {
+	if strings.Join(*got2, ",") != "chan@"+at(ts)+",chan/r1@"+at(ts) {
 		t.Fatalf("collapsed: %v", *got2)
+	}
+	// Unread count unavailable: no thread is marked.
+	c3, got3 := threadReadClient(t, true)
+	c3.unreadThreadsFn = func(string) ([]string, error) { return nil, errors.New("down") }
+	c3.handleChannelsViewed(&mattermost.ChannelsViewedEvent{Times: map[string]int64{"chan": ts}})
+	if strings.Join(*got3, ",") != "chan@"+at(ts) {
+		t.Fatalf("unread unknown: %v", *got3)
+	}
+	// A channel without a team (DM): nothing to ask, nothing marked.
+	if _, ok := c3.unreadThreads(""); ok {
+		t.Fatal("unread threads for no team")
 	}
 }
 
@@ -117,9 +135,9 @@ func TestThreadCatchUp(t *testing.T) {
 		c.noteMemberships([]*mattermost.ChannelMember{{ChannelID: "chan", LastViewedAt: ts + 1000}, {ChannelID: "x"}, {ChannelID: "elsewhere", LastViewedAt: ts}})
 		c.catchUpThreadReads([]*mattermost.Team{{ID: "bad"}, {ID: "teamB"}})
 		sort.Strings(*got)
-		want := []string{"chan/read@" + at(ts)}
+		want := []string{"chan/read@" + at(ts), "chan/r1@" + at(ts+1000)}
 		if !collapsed {
-			want = append(want, "chan/r1@"+at(ts+1000), "chan/r2@"+at(ts+1000))
+			want = append(want, "chan/r2@"+at(ts+1000))
 		}
 		sort.Strings(want)
 		if strings.Join(*got, ",") != strings.Join(want, ",") || strings.Join(teams, ",") != "bad,teamB" {
