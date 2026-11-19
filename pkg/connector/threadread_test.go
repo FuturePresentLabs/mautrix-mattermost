@@ -135,7 +135,7 @@ func TestThreadCatchUp(t *testing.T) {
 		c.noteMemberships([]*mattermost.ChannelMember{{ChannelID: "chan", LastViewedAt: ts + 1000}, {ChannelID: "x"}, {ChannelID: "elsewhere", LastViewedAt: ts}})
 		c.catchUpThreadReads([]*mattermost.Team{{ID: "bad"}, {ID: "teamB"}})
 		sort.Strings(*got)
-		want := []string{"chan/read@" + at(ts), "chan/r1@" + at(ts+1000)}
+		want := []string{"chan/read@" + at(ts), "chan@" + at(ts+1000), "chan/r1@" + at(ts+1000)}
 		if !collapsed {
 			want = append(want, "chan/r2@"+at(ts+1000))
 		}
