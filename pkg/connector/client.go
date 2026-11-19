@@ -135,7 +135,15 @@ type MattermostClient struct {
 	muted map[string]bool
 	// Test hooks for mutes.
 	membershipsFn func(teamID string) ([]*mattermost.ChannelMember, error)
-	muteRoomFn    func(channelID string, until time.Time) bool
+	// Thread read sync (threadread.go).
+	lastViewed         map[string]int64
+	threadReadAt       map[string]time.Time
+	collapsedOn        bool
+	collapsedKnown     bool
+	collapsedThreadsFn func() bool
+	threadRootsFn      func(channelID string, since time.Time) []string
+	userThreadsFn      func(teamID string) ([]*mattermost.UserThread, error)
+	muteRoomFn         func(channelID string, until time.Time) bool
 	// Test hooks for account logins (teamtoggle.go).
 	accountLoginsFn func() bool
 	listTeamsFn     func() ([]*mattermost.Team, error)
@@ -569,6 +577,9 @@ func (c *MattermostClient) processEvents() {
 		case *mattermost.ChannelsViewedEvent:
 			c.handleChannelsViewed(evt)
 
+		case *mattermost.ThreadReadEvent:
+			c.handleThreadRead(evt)
+
 		case *mattermost.ChannelMemberUpdatedEvent:
 			c.handleMemberUpdated(context.Background(), evt.Member)
 
@@ -663,6 +674,7 @@ func (c *MattermostClient) syncChannels() {
 	}
 
 	c.syncExistingMutes(context.Background(), listingComplete && mutesComplete)
+	c.catchUpThreadReads(c.ownTeams(teams))
 
 	// Rooms this login has for other logins' channels (made before teams
 	// were per login) are removed; the owning login has its own.

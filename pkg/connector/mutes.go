@@ -31,9 +31,13 @@ func (c *MattermostClient) noteMemberships(members []*mattermost.ChannelMember) 
 	if c.muted == nil {
 		c.muted = make(map[string]bool, len(members))
 	}
+	if c.lastViewed == nil {
+		c.lastViewed = make(map[string]int64, len(members))
+	}
 	for _, m := range members {
 		if m != nil && m.ChannelID != "" {
 			c.muted[m.ChannelID] = m.Muted()
+			c.lastViewed[m.ChannelID] = m.LastViewedAt
 		}
 	}
 }

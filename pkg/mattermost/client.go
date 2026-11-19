@@ -283,6 +283,11 @@ func (c *Client) parseEvent(raw []byte) {
 			c.Events <- &ChannelsViewedEvent{Times: map[string]int64{id: 0}}
 		}
 
+	case "thread_read_changed":
+		if evt := threadReadEvent(env); evt != nil {
+			c.Events <- evt
+		}
+
 	case "system_console_noti": // ignore console notifications
 
 	default:
@@ -323,6 +328,21 @@ func channelsViewedEvent(data map[string]interface{}) *ChannelsViewedEvent {
 		return nil
 	}
 	return &ChannelsViewedEvent{Times: times}
+}
+
+// threadReadEvent decodes "thread_read_changed": the thread (root post ID),
+// its channel and the time (ms) it was read up to.
+func threadReadEvent(env WSEvent) *ThreadReadEvent {
+	threadID := strFromData(env.Data, "thread_id")
+	channelID := strFromData(env.Data, "channel_id")
+	if channelID == "" {
+		channelID = env.Broadcast.ChannelID
+	}
+	ts, _ := env.Data["timestamp"].(float64)
+	if threadID == "" || channelID == "" {
+		return nil
+	}
+	return &ThreadReadEvent{ThreadID: threadID, ChannelID: channelID, Timestamp: int64(ts)}
 }
 
 // --- helpers ---
