@@ -132,7 +132,7 @@ func (c *MattermostClient) handleChannelsViewed(evt *mattermost.ChannelsViewedEv
 				Type:      bridgev2.RemoteEventReadReceipt,
 				PortalKey: networkid.PortalKey{ID: networkid.PortalID(channelID), Receiver: c.UserLogin.ID},
 				Sender:    bridgev2.EventSender{IsFromMe: true, SenderLogin: c.UserLogin.ID},
-				Timestamp: t,
+				Timestamp: c.receiptTime(t),
 			},
 			ReadUpTo: t,
 		})

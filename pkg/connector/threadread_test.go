@@ -209,3 +209,29 @@ func TestSyncCatchesUpOwnTeamsOnly(t *testing.T) {
 		t.Fatalf("caught up teams %v", teams)
 	}
 }
+
+func TestReceiptsStampedWhenSent(t *testing.T) {
+	c, _ := threadReadClient(t, false)
+	var stamps []time.Time
+	c.queueRemoteEventFn = func(ev bridgev2.RemoteEvent) bridgev2.EventHandlingResult {
+		r := ev.(*simplevent.Receipt)
+		if r.ReadUpTo.After(dmNow) {
+			t.Fatalf("read up to moved: %v", r.ReadUpTo)
+		}
+		stamps = append(stamps, r.Timestamp)
+		return bridgev2.EventHandlingResultQueued
+	}
+	old := dmNow.Add(-5 * time.Hour)
+	c.handleChannelsViewed(&mattermost.ChannelsViewedEvent{Times: map[string]int64{"chan": old.UnixMilli()}})
+	if len(stamps) != 3 {
+		t.Fatalf("receipts %d", len(stamps))
+	}
+	for _, s := range stamps {
+		if !s.Equal(dmNow) {
+			t.Fatalf("stamped %v, want now %v", s, dmNow)
+		}
+	}
+	if got := c.receiptTime(dmNow.Add(time.Minute)); !got.Equal(dmNow.Add(time.Minute)) {
+		t.Fatalf("future read stamped %v", got)
+	}
+}
