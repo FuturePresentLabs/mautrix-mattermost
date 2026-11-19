@@ -38,11 +38,15 @@ func mediaMsgType(contentType string) event.MessageType {
 // thread root and previous thread event, which points at the right event even
 // when a later reply in the same thread is the fallback target.
 func threadRelation(post *mattermost.Post) (replyTo *networkid.MessageOptionalPartID, threadRoot *networkid.MessageID) {
-	if post == nil || post.RootID == "" {
+	if post == nil {
 		return nil, nil
 	}
+	replyTo = quotedReplyTarget(post) // set only for quoted replies (quotes.go)
+	if post.RootID == "" {
+		return replyTo, nil
+	}
 	root := networkid.MessageID(post.RootID)
-	return nil, &root
+	return replyTo, &root
 }
 
 // convertPost converts a Mattermost post (text + file attachments) into Matrix message parts.

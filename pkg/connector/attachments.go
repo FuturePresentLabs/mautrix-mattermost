@@ -27,8 +27,9 @@ import (
 // postMarkdown is a post's full Markdown: its message plus its attachments.
 func postMarkdown(post *mattermost.Post) string {
 	blocks := make([]string, 0, 4)
-	if strings.TrimSpace(post.Message) != "" {
-		blocks = append(blocks, post.Message)
+	// A quoted reply's quote block is dropped: it becomes a Matrix reply.
+	if msg := post.QuotedReplyBody(); strings.TrimSpace(msg) != "" {
+		blocks = append(blocks, msg)
 	}
 	for _, a := range post.Attachments() {
 		if restatesMessage(a, post.Message) {

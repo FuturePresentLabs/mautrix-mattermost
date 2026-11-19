@@ -84,6 +84,7 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Bool, "team_logins")
 	helper.Copy(configupgrade.Bool, "mute_channels_on_create")
 	helper.Copy(configupgrade.Str, "account_space_name")
+	helper.Copy(configupgrade.Bool, "quoted_replies")
 }
 
 func (m *MattermostConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
@@ -446,6 +447,9 @@ type Config struct {
 	// AccountSpaceName names an account login's own space (teamtoggle.go).
 	// Empty keeps the framework's "Mattermost (<login>)".
 	AccountSpaceName string `yaml:"account_space_name"`
+	// QuotedReplies sends Matrix replies as Channel Reply plugin quoted
+	// replies when the server has the plugin (quotes.go).
+	QuotedReplies bool `yaml:"quoted_replies"`
 }
 
 const ExampleConfig = `# Mattermost Bridge Configuration
@@ -492,4 +496,10 @@ mute_channels_on_create: true
 # Name of the account's own space, which holds the DMs and the team spaces,
 # when one login covers the account. Empty keeps "Mattermost (<username>)".
 account_space_name: Mattermost DMs
+
+# Send replies that are not in a thread as quoted replies in the channel,
+# when the Mattermost server has the Channel Reply plugin
+# (com.github.mattermost-channel-reply). Without the plugin, or with this
+# off, a reply goes to the thread of the message replied to.
+quoted_replies: true
 `
