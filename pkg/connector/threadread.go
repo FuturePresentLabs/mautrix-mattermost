@@ -38,6 +38,32 @@ const threadRootsQuery = `SELECT DISTINCT thread_root_id FROM message
 WHERE bridge_id = $1 AND room_id = $2 AND room_receiver = $3
   AND thread_root_id IS NOT NULL AND thread_root_id <> '' AND timestamp >= $4`
 
+const lastMainMessageQuery = `SELECT id FROM message
+WHERE bridge_id = $1 AND room_id = $2 AND room_receiver = $3
+  AND (thread_root_id IS NULL OR thread_root_id = '') AND timestamp <= $4
+ORDER BY timestamp DESC LIMIT 1`
+
+// lastMainMessage is the room's last message outside threads at or before t,
+// the target of a room's read receipt. A room receipt must point at the main
+// timeline: the framework would otherwise target the last message of any
+// kind, and a room receipt on a thread reply is not applied by the server.
+// "" leaves the choice to the framework (no such message, or no database).
+func (c *MattermostClient) lastMainMessage(channelID string, t time.Time) networkid.MessageID {
+	if c.lastMainMessageFn != nil {
+		return c.lastMainMessageFn(channelID, t)
+	}
+	if c.UserLogin == nil || c.UserLogin.Bridge == nil || c.UserLogin.Bridge.DB == nil {
+		return ""
+	}
+	var id string
+	err := c.UserLogin.Bridge.DB.QueryRow(context.Background(), lastMainMessageQuery,
+		c.UserLogin.Bridge.ID, channelID, c.UserLogin.ID, t.UnixNano()).Scan(&id)
+	if err != nil {
+		return ""
+	}
+	return networkid.MessageID(id)
+}
+
 // noteThreadRead records that a thread was read up to t and reports whether
 // that is news.
 func (c *MattermostClient) noteThreadRead(rootID string, t time.Time) bool {

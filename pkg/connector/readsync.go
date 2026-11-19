@@ -134,7 +134,8 @@ func (c *MattermostClient) handleChannelsViewed(evt *mattermost.ChannelsViewedEv
 				Sender:    bridgev2.EventSender{IsFromMe: true, SenderLogin: c.UserLogin.ID},
 				Timestamp: c.receiptTime(t),
 			},
-			ReadUpTo: t,
+			ReadUpTo:   t,
+			LastTarget: c.lastMainMessage(channelID, t),
 		})
 		c.readChannelThreads(channelID, t)
 	}

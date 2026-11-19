@@ -144,6 +144,7 @@ type MattermostClient struct {
 	threadRootsFn      func(channelID string, since time.Time) []string
 	userThreadsFn      func(teamID string) ([]*mattermost.UserThread, error)
 	unreadThreadsFn    func(teamID string) ([]string, error)
+	lastMainMessageFn  func(channelID string, t time.Time) networkid.MessageID
 	muteRoomFn         func(channelID string, until time.Time) bool
 	// Test hooks for account logins (teamtoggle.go).
 	accountLoginsFn func() bool
