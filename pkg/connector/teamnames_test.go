@@ -38,6 +38,11 @@ func TestChannelTitles(t *testing.T) {
 	if c.channelTitle(&mattermost.Channel{ID: "e", TeamID: "tA", Type: "O"}) != "" || c.channelTitle(nil) != "" {
 		t.Fatal("empty name not empty")
 	}
+	// In a team space, Beeper shows the space name itself.
+	c.teamSpacesFn = func() bool { return true }
+	if got := c.channelTitle(town); got != "Town Square" {
+		t.Fatalf("with team spaces: %q, want no suffix", got)
+	}
 }
 
 func TestSyncedChannelNamesCarryTeam(t *testing.T) {

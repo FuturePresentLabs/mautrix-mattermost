@@ -208,8 +208,9 @@ The account's own space, which holds the DMs and the team spaces, is named
 `Mattermost DMs` (`network.account_space_name`; empty keeps the framework's
 `Mattermost (<username>)`).
 
-When your account is in more than one team, team channels are named with their team,
-such as `Town Square · Example`.
+When your account is in more than one team and team spaces are off, team channels are
+named with their team, such as `Town Square · Example`. With team spaces on the names
+stay plain, since Beeper already shows a chat in a space as `<chat> · <space>`.
 
 ### One login per team
 

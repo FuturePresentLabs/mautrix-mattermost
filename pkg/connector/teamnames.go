@@ -15,7 +15,9 @@ import (
 // "Town Square · Example". Each team is its own login (teamlogin.go), but a
 // client may show every login with the same icon, and then the name is the
 // only thing that tells two teams' Town Squares apart. DMs and group DMs
-// have no team and keep their names.
+// have no team and keep their names. With team spaces on, the name stays
+// plain: Beeper itself shows a chat in a space as "<chat> · <space>", so a
+// suffix of our own would show the team twice.
 
 const teamSuffixSep = " · "
 
@@ -31,12 +33,13 @@ func (c *MattermostClient) noteTeams(teams []*mattermost.Team) {
 }
 
 // channelTitle is a channel's room name: its display name, with " · <team>"
-// for a team channel when the account has more than one team.
+// for a team channel when the account has more than one team and team spaces
+// are off.
 func (c *MattermostClient) channelTitle(ch *mattermost.Channel) string {
 	if ch == nil || ch.DisplayName == "" {
 		return ""
 	}
-	if ch.TeamID == "" || ch.IsDM() || ch.IsGroupDM() {
+	if ch.TeamID == "" || ch.IsDM() || ch.IsGroupDM() || c.teamSpacesEnabled() {
 		return ch.DisplayName
 	}
 	c.mu.RLock()
