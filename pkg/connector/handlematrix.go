@@ -115,7 +115,7 @@ func (c *MattermostClient) HandleMatrixMessage(ctx context.Context, msg *bridgev
 			body = "_" + body + "_"
 		}
 		zerolog.Ctx(ctx).Debug().Str("channel", channelID).Msg("Sending message to Mattermost")
-		postID, err := mattermost.SendPost(c.serverURL(), c.Token, channelID, body, rootID)
+		postID, err := c.sendPost(ctx, msg, mattermost.NewPost{ChannelID: channelID, Message: body, RootID: rootID})
 		if err != nil {
 			return nil, wrapSendErr(err)
 		}
@@ -169,7 +169,7 @@ func (c *MattermostClient) HandleMatrixMessage(ctx context.Context, msg *bridgev
 			return nil, wrapSendErr(fmt.Errorf("failed to upload media: %w", err))
 		}
 
-		postID, err := mattermost.SendPost(c.serverURL(), c.Token, channelID, mediaCaption(content), rootID, fileID)
+		postID, err := c.sendPost(ctx, msg, mattermost.NewPost{ChannelID: channelID, Message: mediaCaption(content), RootID: rootID, FileIDs: []string{fileID}})
 		if err != nil {
 			return nil, wrapSendErr(err)
 		}
@@ -202,7 +202,9 @@ func (c *MattermostClient) HandleMatrixEdit(ctx context.Context, msg *bridgev2.M
 		return wrapSendErr(errCommandMessage)
 	}
 	newBody := c.outboundMarkdown(ctx, src)
-
+	if handled, err := c.editQuotedReply(string(msg.EditTarget.ID), newBody); handled {
+		return wrapSendErr(err)
+	}
 	return wrapSendErr(mattermost.EditPost(c.serverURL(), c.Token, string(msg.EditTarget.ID), newBody))
 }
 

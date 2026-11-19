@@ -220,6 +220,20 @@ and uses its icon. Exactly one of the logins carries the DMs: your first, unless
 choose another with `dm-team <team>` (`dm-team` alone lists them). A login made before
 logins had teams is pinned to your first team by name on its next connect.
 
+## Replies
+
+Mattermost replies are threads. With the [Channel Reply](https://github.com/Azario16/mattermost-plugin-channel-reply)
+plugin on the server, Mattermost also has replies to one message, posted in the channel with
+a quote of it, and the bridge uses them (`network.quoted_replies`, on by default):
+
+- A reply sent from Matrix outside a thread becomes a quoted reply in the channel. Inside a
+  thread it becomes a quoted reply in that thread. Edits keep the quote.
+- A quoted reply made in Mattermost arrives as a Matrix reply to the message it quotes,
+  without the quote block.
+
+The bridge asks the server whether the plugin is active (every 10 minutes). Without it, or
+with the option off, a reply goes to the thread of the message replied to.
+
 ## Read sync
 
 Reading is synced both ways. Reading a room or thread in Matrix marks it read in

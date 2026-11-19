@@ -142,6 +142,10 @@ type MattermostClient struct {
 	resyncFn        func()
 	afterDelayFn    func(time.Duration, func())
 	muteChannelsFn  func() bool
+	// Channel Reply plugin state (quotes.go).
+	quotedRepliesFn    func() bool
+	quotePluginActive  bool
+	quotePluginChecked time.Time
 	// accountSpaceNameFn overrides network.account_space_name.
 	accountSpaceNameFn func() string
 	// setSpaceStateFails makes setSpaceStateFn report failure.
