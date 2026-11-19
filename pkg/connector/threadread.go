@@ -53,6 +53,19 @@ func (c *MattermostClient) noteThreadRead(rootID string, t time.Time) bool {
 	return true
 }
 
+// receiptTime is the time a read receipt is sent with: now, or the read time
+// when that is later. The receipt says what was read through ReadUpTo; its
+// timestamp is when the read is recorded. Beeper keeps the receipt with the
+// latest timestamp, so a receipt carrying an older read time (a catch-up
+// after rooms were created, which stamps them read at creation) would be
+// ignored even though it points further down the room.
+func (c *MattermostClient) receiptTime(readAt time.Time) time.Time {
+	if now := c.now(); now.After(readAt) {
+		return now
+	}
+	return readAt
+}
+
 // queueThreadReceipt marks a thread read in Matrix, as the user.
 func (c *MattermostClient) queueThreadReceipt(channelID, rootID string, upTo time.Time) {
 	if rootID == "" || channelID == "" || upTo.IsZero() || !c.noteThreadRead(rootID, upTo) {
@@ -63,7 +76,7 @@ func (c *MattermostClient) queueThreadReceipt(channelID, rootID string, upTo tim
 			Type:      bridgev2.RemoteEventReadReceipt,
 			PortalKey: networkid.PortalKey{ID: networkid.PortalID(channelID), Receiver: c.UserLogin.ID},
 			Sender:    bridgev2.EventSender{IsFromMe: true, SenderLogin: c.UserLogin.ID},
-			Timestamp: upTo,
+			Timestamp: c.receiptTime(upTo),
 		},
 		ReadUpTo:   upTo,
 		ThreadRoot: networkid.MessageID(rootID),
