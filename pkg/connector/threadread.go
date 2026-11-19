@@ -196,8 +196,8 @@ func (c *MattermostClient) userThreads(teamID string) ([]*mattermost.UserThread,
 	return mattermost.GetUserThreads(c.serverURL(), c.Token, teamID)
 }
 
-// catchUpThreadReads marks threads read in Matrix that Mattermost has as
-// read, for the teams synced on connect.
+// catchUpThreadReads marks rooms and threads read in Matrix that Mattermost
+// has as read, for the teams synced on connect.
 func (c *MattermostClient) catchUpThreadReads(teams []*mattermost.Team) {
 	c.resetCollapsedThreads()
 	for _, team := range teams {
@@ -214,10 +214,17 @@ func (c *MattermostClient) catchUpThreadReads(teams []*mattermost.Team) {
 			c.queueThreadReceipt(th.Post.ChannelID, th.ID, time.UnixMilli(th.LastViewedAt))
 		}
 	}
+	// Each channel as if viewed again at its last view: the room is marked
+	// read (rooms created or rebuilt since the view would otherwise stay
+	// unread) and so are its threads.
+	views := &mattermost.ChannelsViewedEvent{Times: map[string]int64{}}
 	for channelID, viewed := range c.channelViews() {
 		if viewed > 0 && c.bridgesChannel(channelID) {
-			c.readChannelThreads(channelID, time.UnixMilli(viewed))
+			views.Times[channelID] = viewed
 		}
+	}
+	if len(views.Times) > 0 {
+		c.handleChannelsViewed(views)
 	}
 }
 

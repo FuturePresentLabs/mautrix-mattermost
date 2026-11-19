@@ -227,7 +227,7 @@ Matrix keeps a read marker per thread, so the bridge marks threads read as well 
 - Reading a thread in Mattermost marks it read in Matrix (and the other way round).
 - Viewing a channel in Mattermost marks its threads read, except threads Mattermost counts
   as unread (with collapsed reply threads on, only followed threads can be unread there).
-- On connect, threads Mattermost already has as read are marked read in Matrix.
+- On connect, rooms and threads Mattermost already has as read are marked read in Matrix.
 
 This clears thread unread counts (such as Beeper's Unread threads) for threads you read in
 Mattermost.
