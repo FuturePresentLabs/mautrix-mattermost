@@ -36,3 +36,7 @@ network:
     # DMs notify. Unmute any room you want to hear from. Mutes you set in
     # Mattermost are copied either way.
     mute_channels_on_create: true
+
+    # Name of the account's own space, which holds the DMs and the team spaces,
+    # when one login covers the account. Empty keeps "Mattermost (<username>)".
+    account_space_name: Mattermost DMs

@@ -131,23 +131,26 @@ func (c *MattermostClient) setSpaceName(label string) {
 	c.setSpaceState(event.StateRoomName, &event.RoomNameEventContent{Name: name})
 }
 
-func (c *MattermostClient) setSpaceState(evtType event.Type, content any) {
+// setSpaceState sets state on the login's space and reports success.
+func (c *MattermostClient) setSpaceState(evtType event.Type, content any) bool {
 	lg := c.lifecycleLogger()
 	if c.setSpaceStateFn != nil {
 		c.setSpaceStateFn(evtType, content)
-		return
+		return !c.setSpaceStateFails
 	}
 	if c.UserLogin == nil || c.UserLogin.Bridge == nil || c.UserLogin.Bridge.Bot == nil {
-		return
+		return false
 	}
 	ctx := context.Background()
 	space, err := c.UserLogin.GetSpaceRoom(ctx)
 	if err != nil || space == "" {
-		return
+		return false
 	}
 	if _, err := c.UserLogin.Bridge.Bot.SendState(ctx, space, evtType, "", &event.Content{Parsed: content}, time.Time{}); err != nil {
 		lg.Warn().Err(err).Stringer("type", evtType).Msg("Could not update the login's space")
+		return false
 	}
+	return true
 }
 
 func (c *MattermostClient) saveLogin() {

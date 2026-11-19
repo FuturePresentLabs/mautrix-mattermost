@@ -230,6 +230,9 @@ func TestExampleConfigsDocumentDisplayNames(t *testing.T) {
 	if cfg.TeamLogins || file.Network.TeamLogins {
 		t.Errorf("team_logins on by default (embedded %v / file %v)", cfg.TeamLogins, file.Network.TeamLogins)
 	}
+	if cfg.AccountSpaceName != "Mattermost DMs" || file.Network.AccountSpaceName != "Mattermost DMs" {
+		t.Errorf("account_space_name = %q (embedded) / %q (file)", cfg.AccountSpaceName, file.Network.AccountSpaceName)
+	}
 	if !cfg.MuteChannelsOnCreate || !file.Network.MuteChannelsOnCreate {
 		t.Errorf("mute_channels_on_create off by default (embedded %v / file %v)", cfg.MuteChannelsOnCreate, file.Network.MuteChannelsOnCreate)
 	}
@@ -237,7 +240,7 @@ func TestExampleConfigsDocumentDisplayNames(t *testing.T) {
 
 func TestDisplayNamesSurvivesConfigUpgrade(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("network:\n    display_names: full_name\n    dm_status: dnd\n    team_spaces: false\n    team_logins: true\n    mute_channels_on_create: false\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("network:\n    display_names: full_name\n    dm_status: dnd\n    team_spaces: false\n    team_logins: true\n    mute_channels_on_create: false\n    account_space_name: Work\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	example, _, networkUpgrader := (&MattermostConnector{}).GetConfig()
@@ -261,7 +264,7 @@ func TestDisplayNamesSurvivesConfigUpgrade(t *testing.T) {
 	if full.Network.DMStatus != "dnd" {
 		t.Fatalf("dm_status lost in upgrade:\n%s", data)
 	}
-	if full.Network.TeamSpaces || !full.Network.TeamLogins || full.Network.MuteChannelsOnCreate {
+	if full.Network.TeamSpaces || !full.Network.TeamLogins || full.Network.MuteChannelsOnCreate || full.Network.AccountSpaceName != "Work" {
 		t.Fatalf("team options lost in upgrade:\n%s", data)
 	}
 	if full.Network.DisplayNames != "full_name" {

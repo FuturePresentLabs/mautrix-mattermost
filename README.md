@@ -204,6 +204,10 @@ bridge covers a Discord account:
   ones you want to hear from (`network.mute_channels_on_create`, on by default). Rooms
   that already exist are never re-muted.
 
+The account's own space, which holds the DMs and the team spaces, is named
+`Mattermost DMs` (`network.account_space_name`; empty keeps the framework's
+`Mattermost (<username>)`).
+
 When your account is in more than one team, team channels are named with their team,
 such as `Town Square · Example`.
 

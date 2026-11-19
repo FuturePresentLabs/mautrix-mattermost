@@ -9,6 +9,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/commands"
 	"maunium.net/go/mautrix/bridgev2/networkid"
+	"maunium.net/go/mautrix/event"
 
 	"github.com/bostrot/mautrix-mattermost/pkg/mattermost"
 )
@@ -77,6 +78,33 @@ func accountLogin(existing []*bridgev2.UserLogin, v *verifiedLogin) (networkid.U
 		}
 	}
 	return networkid.UserLoginID(v.userID), meta
+}
+
+// accountSpaceName is network.account_space_name ("" without a config).
+func (c *MattermostClient) accountSpaceName() string {
+	if c.accountSpaceNameFn != nil {
+		return c.accountSpaceNameFn()
+	}
+	if cfg := bridgeConfig(c.bridge()); cfg != nil {
+		return strings.TrimSpace(cfg.AccountSpaceName)
+	}
+	return ""
+}
+
+// syncAccountSpaceName names an account login's space after
+// network.account_space_name, once per change. The framework names the space
+// only when creating it.
+func (c *MattermostClient) syncAccountSpaceName() {
+	meta := c.loginMeta()
+	name := c.accountSpaceName()
+	if meta == nil || meta.TeamID != "" || !c.accountLogins() || name == "" || meta.SpaceName == name {
+		return
+	}
+	if !c.setSpaceState(event.StateRoomName, &event.RoomNameEventContent{Name: name}) {
+		return // retried on the next connect
+	}
+	meta.SpaceName = name
+	c.saveLogin()
 }
 
 // setTeamEnabled switches a team on or off and reports whether that changed.

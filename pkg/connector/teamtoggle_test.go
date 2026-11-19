@@ -218,3 +218,67 @@ func TestTeamOptionsFromConfig(t *testing.T) {
 		t.Fatal("defaults without a bridge config changed")
 	}
 }
+
+func TestAccountSpaceName(t *testing.T) {
+	c := scopedClient(&UserLoginMetadata{})
+	c.accountLoginsFn = func() bool { return true }
+	name := "Mattermost DMs"
+	c.accountSpaceNameFn = func() string { return name }
+	var set []string
+	c.setSpaceStateFn = func(typ event.Type, content any) {
+		if v, ok := content.(*event.RoomNameEventContent); ok && typ == event.StateRoomName {
+			set = append(set, v.Name)
+		}
+	}
+	saves := 0
+	c.saveLoginFn = func() { saves++ }
+	c.setSpaceStateFails = true
+	c.syncAccountSpaceName()
+	if c.loginMeta().SpaceName != "" || saves != 0 {
+		t.Fatal("a failed rename was recorded")
+	}
+	c.setSpaceStateFails = false
+	c.syncAccountSpaceName()
+	c.syncAccountSpaceName()
+	if strings.Join(set, "|") != "Mattermost DMs|Mattermost DMs" || saves != 1 || c.loginMeta().SpaceName != name {
+		t.Fatalf("set %v saves %d meta %q", set, saves, c.loginMeta().SpaceName)
+	}
+	name = "Work chats"
+	c.syncAccountSpaceName()
+	if set[len(set)-1] != "Work chats" || saves != 2 {
+		t.Fatalf("rename on change: %v saves %d", set, saves)
+	}
+	set = nil
+	name = ""
+	c.syncAccountSpaceName()
+	team := scopedClient(&UserLoginMetadata{TeamID: "tA"})
+	team.accountLoginsFn = func() bool { return true }
+	team.accountSpaceNameFn = func() string { return "X" }
+	team.setSpaceStateFn = c.setSpaceStateFn
+	team.syncAccountSpaceName()
+	perTeam := scopedClient(&UserLoginMetadata{})
+	perTeam.accountLoginsFn = func() bool { return false }
+	perTeam.accountSpaceNameFn = func() string { return "X" }
+	perTeam.setSpaceStateFn = c.setSpaceStateFn
+	perTeam.syncAccountSpaceName()
+	if len(set) != 0 {
+		t.Fatalf("renamed with an empty name, a team login or per-team logins: %v", set)
+	}
+}
+
+func TestAccountSpaceNameFromConfig(t *testing.T) {
+	br := &bridgev2.Bridge{Network: &MattermostConnector{Config: &Config{AccountSpaceName: "  Mattermost DMs "}}}
+	c := &MattermostClient{UserLogin: &bridgev2.UserLogin{UserLogin: &database.UserLogin{}, Bridge: br}}
+	if c.accountSpaceName() != "Mattermost DMs" || (&MattermostClient{}).accountSpaceName() != "" {
+		t.Fatalf("name %q", c.accountSpaceName())
+	}
+}
+
+func TestSyncNamesAccountSpace(t *testing.T) {
+	c, rec := accountClient(t, nil, nil)
+	c.accountSpaceNameFn = func() string { return "Mattermost DMs" }
+	c.syncChannels()
+	if strings.Join(rec.state, ",") != "name=Mattermost DMs" {
+		t.Fatalf("space state %v", rec.state)
+	}
+}

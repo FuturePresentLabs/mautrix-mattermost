@@ -83,6 +83,7 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Bool, "team_spaces")
 	helper.Copy(configupgrade.Bool, "team_logins")
 	helper.Copy(configupgrade.Bool, "mute_channels_on_create")
+	helper.Copy(configupgrade.Str, "account_space_name")
 }
 
 func (m *MattermostConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
@@ -157,6 +158,9 @@ type UserLoginMetadata struct {
 	// EnabledTeams is the teams an account login (no TeamID) bridges, keyed
 	// by team ID (teamtoggle.go). Teams start switched off.
 	EnabledTeams map[string]bool `json:"enabled_teams,omitempty"`
+	// SpaceName is the account space name last set, so it is set once per
+	// change of network.account_space_name.
+	SpaceName string `json:"space_name,omitempty"`
 }
 
 // --- PAT Login ---
@@ -439,6 +443,9 @@ type Config struct {
 	// MuteChannelsOnCreate mutes a team channel's room when it is created,
 	// so channels stay quiet and DMs notify.
 	MuteChannelsOnCreate bool `yaml:"mute_channels_on_create"`
+	// AccountSpaceName names an account login's own space (teamtoggle.go).
+	// Empty keeps the framework's "Mattermost (<login>)".
+	AccountSpaceName string `yaml:"account_space_name"`
 }
 
 const ExampleConfig = `# Mattermost Bridge Configuration
@@ -481,4 +488,8 @@ team_logins: false
 # DMs notify. Unmute any room you want to hear from. Mutes you set in
 # Mattermost are copied either way.
 mute_channels_on_create: true
+
+# Name of the account's own space, which holds the DMs and the team spaces,
+# when one login covers the account. Empty keeps "Mattermost (<username>)".
+account_space_name: Mattermost DMs
 `

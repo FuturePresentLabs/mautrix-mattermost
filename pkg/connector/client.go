@@ -142,6 +142,10 @@ type MattermostClient struct {
 	resyncFn        func()
 	afterDelayFn    func(time.Duration, func())
 	muteChannelsFn  func() bool
+	// accountSpaceNameFn overrides network.account_space_name.
+	accountSpaceNameFn func() string
+	// setSpaceStateFails makes setSpaceStateFn report failure.
+	setSpaceStateFails bool
 	// fetchPreviewImageFn overrides downloading link preview images.
 	fetchPreviewImageFn func(src string) ([]byte, string, error)
 	// clearSpaceParentsFn overrides unlinking rooms from a team space.
@@ -610,6 +614,7 @@ func (c *MattermostClient) syncChannels() {
 	c.noteTeams(teams)
 	c.pinLegacyLogin(teams)
 	c.syncLoginProfile(teams)
+	c.syncAccountSpaceName()
 
 	// Spaces first, so channels have their parent space when they sync.
 	c.syncTeams(teams)
