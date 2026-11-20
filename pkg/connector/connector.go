@@ -61,7 +61,9 @@ func (m *MattermostConnector) GetDBMetaTypes() database.MetaTypes {
 }
 
 func (m *MattermostConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {
-	return &bridgev2.NetworkGeneralCapabilities{}
+	// Start the expiry worker even when scheduling new notices is disabled,
+	// so it can finish processing notices already stored in the database.
+	return &bridgev2.NetworkGeneralCapabilities{DisappearingMessages: true}
 }
 
 // GetConfig returns the network section of the config. upgradeConfig has to copy every
@@ -85,6 +87,7 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Bool, "mute_channels_on_create")
 	helper.Copy(configupgrade.Str, "account_space_name")
 	helper.Copy(configupgrade.Bool, "quoted_replies")
+	helper.Copy(configupgrade.Bool, "expire_ephemeral_notices")
 }
 
 func (m *MattermostConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserLogin) error {
@@ -450,6 +453,8 @@ type Config struct {
 	// QuotedReplies sends Matrix replies as Channel Reply plugin quoted
 	// replies when the server has the plugin (quotes.go).
 	QuotedReplies bool `yaml:"quoted_replies"`
+	// ExpireEphemeralNotices expires copies of private Mattermost replies.
+	ExpireEphemeralNotices bool `yaml:"expire_ephemeral_notices"`
 }
 
 const ExampleConfig = `# Mattermost Bridge Configuration
@@ -502,4 +507,9 @@ account_space_name: Mattermost DMs
 # (com.github.mattermost-channel-reply). Without the plugin, or with this
 # off, a reply goes to the thread of the message replied to.
 quoted_replies: true
+
+# Remove copies of private Mattermost replies (for example /gcal today) from the
+# Matrix room after 24 hours. Mattermost has no event for dismissing them.
+# Bridge status messages and ordinary bot DMs are not removed.
+expire_ephemeral_notices: true
 `
