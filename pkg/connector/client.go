@@ -780,6 +780,10 @@ func (c *MattermostClient) sendNotice(channelID networkid.PortalID, body string)
 // queueNotice queues a notice from the bridge into a channel portal, in the
 // thread of post rootID when set. markdown renders text as Markdown.
 func (c *MattermostClient) queueNotice(channelID networkid.PortalID, rootID, body string, markdown bool) {
+	c.queueNoticeWithExpiry(channelID, rootID, body, markdown, 0)
+}
+
+func (c *MattermostClient) queueNoticeWithExpiry(channelID networkid.PortalID, rootID, body string, markdown bool, expiry time.Duration) {
 	c.queueEvent(&simplevent.Message[string]{
 		EventMeta: simplevent.EventMeta{
 			Type:         bridgev2.RemoteEventMessage,
@@ -806,6 +810,9 @@ func (c *MattermostClient) queueNotice(channelID networkid.PortalID, rootID, bod
 			if rootID != "" {
 				root := networkid.MessageID(rootID)
 				converted.ThreadRoot = &root
+			}
+			if expiry > 0 {
+				converted.Disappear = database.DisappearingSetting{Type: event.DisappearingTypeAfterSend, Timer: expiry}
 			}
 			return converted, nil
 		},

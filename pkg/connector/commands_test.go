@@ -294,6 +294,57 @@ func TestEphemeralRepliesBecomeNotices(t *testing.T) {
 	}
 }
 
+func TestEphemeralNoticeExpiryWorkerEnabled(t *testing.T) {
+	// Keep draining already-scheduled notices after a restart, even if the user
+	// has disabled scheduling for new notices in the meantime.
+	for _, enabled := range []bool{false, true} {
+		connector := &MattermostConnector{Config: &Config{ExpireEphemeralNotices: enabled}}
+		if !connector.GetCapabilities().DisappearingMessages {
+			t.Errorf("expiry worker disabled with expire_ephemeral_notices=%t", enabled)
+		}
+	}
+}
+
+func TestEphemeralNoticeExpiry(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		enabled   bool
+		wantTimer time.Duration
+	}{
+		{"off", false, 0},
+		{"on", true, 24 * time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := scopedClient(&UserLoginMetadata{TeamID: "tA"})
+			cfg := Config{ExpireEphemeralNotices: tc.enabled}
+			c.UserLogin.Bridge = &bridgev2.Bridge{Network: &MattermostConnector{Config: &cfg}}
+			var queued []*simplevent.Message[string]
+			c.queueRemoteEventFn = func(ev bridgev2.RemoteEvent) bridgev2.EventHandlingResult {
+				queued = append(queued, ev.(*simplevent.Message[string]))
+				return bridgev2.EventHandlingResultQueued
+			}
+			c.relayEphemeral(&mattermost.Post{ChannelID: "ch1", Message: "Private reply"})
+			c.sendNotice("ch1", "Bridge status")
+			if len(queued) != 2 {
+				t.Fatalf("queued %d notices, want 2", len(queued))
+			}
+			for i, m := range queued {
+				conv, err := m.ConvertMessageFunc(context.Background(), nil, nil, m.Data)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var want database.DisappearingSetting
+				if i == 0 && tc.enabled {
+					want = database.DisappearingSetting{Type: event.DisappearingTypeAfterSend, Timer: tc.wantTimer}
+				}
+				if conv.Disappear != want {
+					t.Fatalf("notice %d: disappearance = %+v, want %+v", i, conv.Disappear, want)
+				}
+			}
+		})
+	}
+}
+
 func TestPlainNoticeStaysPlain(t *testing.T) {
 	c := scopedClient(&UserLoginMetadata{TeamID: "tA"})
 	var queued []bridgev2.RemoteEvent

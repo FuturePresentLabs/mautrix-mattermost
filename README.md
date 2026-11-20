@@ -299,7 +299,10 @@ plugin commands work too.
 
 - Replies only you can see (for example "You are now away") appear as notices
   from the bridge. Their formatting and links carry over; buttons only work in
-  Mattermost.
+  Mattermost. Mattermost does not tell the bridge when you dismiss one, so they
+  are removed after 24 hours by default. Set `network.expire_ephemeral_notices`
+  to `false` to keep new private replies. Bridge status messages, ordinary bot
+  messages, and your own commands are not removed.
 - Anything else starting with `/` is posted as text, so `/usr/bin is full` is
   not swallowed. To post text that starts with a command, begin it with `//`:
   `//away` posts "/away".

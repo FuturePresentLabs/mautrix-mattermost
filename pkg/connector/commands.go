@@ -165,6 +165,8 @@ func escapedSlash(body string) (string, bool) {
 	return body, false
 }
 
+const ephemeralNoticeLifetime = 24 * time.Hour
+
 // relayEphemeral shows a post only this user sees (a command's reply) as a
 // notice from the bridge, in the post's thread when it has one.
 func (c *MattermostClient) relayEphemeral(post *mattermost.Post) {
@@ -175,5 +177,13 @@ func (c *MattermostClient) relayEphemeral(post *mattermost.Post) {
 	if md == "" {
 		return
 	}
-	c.queueNotice(networkid.PortalID(post.ChannelID), post.RootID, md, true)
+	c.queueNoticeWithExpiry(networkid.PortalID(post.ChannelID), post.RootID, md, true, c.ephemeralNoticeExpiry())
+}
+
+// ephemeralNoticeExpiry is the lifetime of a copied private reply, or zero.
+func (c *MattermostClient) ephemeralNoticeExpiry() time.Duration {
+	if cfg := bridgeConfig(c.bridge()); cfg != nil && cfg.ExpireEphemeralNotices {
+		return ephemeralNoticeLifetime
+	}
+	return 0
 }

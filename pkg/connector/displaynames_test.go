@@ -239,11 +239,14 @@ func TestExampleConfigsDocumentDisplayNames(t *testing.T) {
 	if !cfg.MuteChannelsOnCreate || !file.Network.MuteChannelsOnCreate {
 		t.Errorf("mute_channels_on_create off by default (embedded %v / file %v)", cfg.MuteChannelsOnCreate, file.Network.MuteChannelsOnCreate)
 	}
+	if !cfg.ExpireEphemeralNotices || !file.Network.ExpireEphemeralNotices {
+		t.Errorf("expire_ephemeral_notices off by default (embedded %v / file %v)", cfg.ExpireEphemeralNotices, file.Network.ExpireEphemeralNotices)
+	}
 }
 
 func TestDisplayNamesSurvivesConfigUpgrade(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("network:\n    display_names: full_name\n    dm_status: dnd\n    team_spaces: false\n    team_logins: true\n    mute_channels_on_create: false\n    account_space_name: Work\n    quoted_replies: false\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("network:\n    display_names: full_name\n    dm_status: dnd\n    team_spaces: false\n    team_logins: true\n    mute_channels_on_create: false\n    account_space_name: Work\n    quoted_replies: false\n    expire_ephemeral_notices: false\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	example, _, networkUpgrader := (&MattermostConnector{}).GetConfig()
@@ -269,6 +272,9 @@ func TestDisplayNamesSurvivesConfigUpgrade(t *testing.T) {
 	}
 	if full.Network.TeamSpaces || !full.Network.TeamLogins || full.Network.MuteChannelsOnCreate || full.Network.AccountSpaceName != "Work" || full.Network.QuotedReplies {
 		t.Fatalf("team options lost in upgrade:\n%s", data)
+	}
+	if full.Network.ExpireEphemeralNotices {
+		t.Fatalf("explicit expire_ephemeral_notices: false lost in upgrade:\n%s", data)
 	}
 	if full.Network.DisplayNames != "full_name" {
 		t.Fatalf("display_names lost in upgrade:\n%s", data)
