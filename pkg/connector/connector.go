@@ -485,7 +485,7 @@ dm_status: all
 
 # Put each Mattermost team's channels in a Matrix space named and pictured like
 # the team. Turning it off moves the channels back out and removes the spaces.
-team_spaces: false
+team_spaces: true
 
 # One login per Mattermost team instead of one login for the whole account.
 # Off (the default): one login carries your DMs and the teams you switch on

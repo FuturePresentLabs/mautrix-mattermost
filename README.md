@@ -199,7 +199,7 @@ bridge covers a Discord account:
   `team` lists your teams with their state, and `team on <team>` or `team off <team>`
   switches one (by name, handle or ID). Switching a team off removes its rooms.
 - Each switched-on team gets a space named and pictured like the team, holding its
-  channels (`network.team_spaces`, off by default).
+  channels (`network.team_spaces`, on by default).
 - New channel rooms start muted, so channels stay quiet while DMs notify; unmute the
   ones you want to hear from (`network.mute_channels_on_create`, on by default). Rooms
   that already exist are never re-muted.

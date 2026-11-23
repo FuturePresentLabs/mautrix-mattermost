@@ -224,8 +224,8 @@ func TestExampleConfigsDocumentDisplayNames(t *testing.T) {
 	if cfg.DMStatus != dmStatusAll || file.Network.DMStatus != dmStatusAll {
 		t.Errorf("dm_status = %q (embedded) / %q (file), want all", cfg.DMStatus, file.Network.DMStatus)
 	}
-	if cfg.TeamSpaces || file.Network.TeamSpaces {
-		t.Errorf("team_spaces on by default (embedded %v / file %v)", cfg.TeamSpaces, file.Network.TeamSpaces)
+	if !cfg.TeamSpaces || !file.Network.TeamSpaces {
+		t.Errorf("team_spaces off by default (embedded %v / file %v)", cfg.TeamSpaces, file.Network.TeamSpaces)
 	}
 	if cfg.TeamLogins || file.Network.TeamLogins {
 		t.Errorf("team_logins on by default (embedded %v / file %v)", cfg.TeamLogins, file.Network.TeamLogins)
