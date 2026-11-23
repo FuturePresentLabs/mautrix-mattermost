@@ -163,7 +163,7 @@ func (c *MattermostClient) lifecycleLogger() zerolog.Logger {
 
 // receiverID is the user login ID used in portal keys, or "" when unknown.
 func (c *MattermostClient) receiverID() networkid.UserLoginID {
-	if c.UserLogin == nil {
+	if c.UserLogin == nil || c.UserLogin.UserLogin == nil {
 		return ""
 	}
 	return c.UserLogin.ID
@@ -299,30 +299,13 @@ func (c *MattermostClient) noteChannelAlive(channelID string) uint64 {
 	return c.bumpChannelGenerationLocked(channelID)
 }
 
-// markCheckQueued records that a deferred check is already queued for the
-// channel. It returns false when one already is, which bounds the number of
-// probes a burst of channel_deleted hints can cause: at most one queued check
-// per channel per lifecycle generation, each issuing at most
-// maxDeferredDeletionProbes probes.
-func (c *MattermostClient) markCheckQueued(channelID string) bool {
+// clearCheckQueued releases the slot only for the check that reserved it.
+func (c *MattermostClient) clearCheckQueued(channelID string, gen uint64) {
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
-	if c.pendingChecks == nil {
-		c.pendingChecks = make(map[string]bool)
+	if c.pendingChecks[channelID] == gen {
+		delete(c.pendingChecks, channelID)
 	}
-	if c.pendingChecks[channelID] {
-		return false
-	}
-	c.pendingChecks[channelID] = true
-	return true
-}
-
-// clearCheckQueued forgets a queued check (it is being evaluated now, or the
-// channel was restored).
-func (c *MattermostClient) clearCheckQueued(channelID string) {
-	c.lifecycleMu.Lock()
-	defer c.lifecycleMu.Unlock()
-	delete(c.pendingChecks, channelID)
 }
 
 // commitChannelDelete marks the channel deleted and re-verifies the generation
@@ -335,37 +318,42 @@ func (c *MattermostClient) commitChannelDelete(channelID string, gen uint64) boo
 	if c.channelGen[channelID] != gen {
 		return false
 	}
-	if c.deletedChannels[channelID] {
+	if _, committed := c.deletedChannels[channelID]; committed {
 		return false
 	}
 	if c.deletedChannels == nil {
 		c.deletedChannels = make(map[string]bool)
 	}
-	c.deletedChannels[channelID] = true
+	c.deletedChannels[channelID] = false
 	return true
 }
 
-// clearChannelDeleted removes the deletion mark (used when the channel is
-// restored).
-func (c *MattermostClient) clearChannelDeleted(channelID string) {
+// finishChannelDelete records the sink result if the commit is still current.
+func (c *MattermostClient) finishChannelDelete(channelID string, gen uint64, success bool) {
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
-	delete(c.deletedChannels, channelID)
+	if c.channelGen[channelID] != gen {
+		return
+	}
+	if success {
+		c.deletedChannels[channelID] = true
+	} else {
+		delete(c.deletedChannels, channelID)
+	}
 }
 
-// isChannelDeleted reports whether a portal deletion was already committed.
+// isChannelDeleted reports whether the portal deletion finished successfully.
 func (c *MattermostClient) isChannelDeleted(channelID string) bool {
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
 	return c.deletedChannels[channelID]
 }
 
-// isCheckQueued reports whether a deferred deletion check is queued for the
-// channel. Tests use it; production code only needs the bound it enforces.
+// isCheckQueued reports whether a deferred deletion check holds the slot.
 func (c *MattermostClient) isCheckQueued(channelID string) bool {
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
-	return c.pendingChecks[channelID]
+	return c.pendingChecks[channelID] != 0
 }
 
 // probeChannel reads the current lifecycle state of a channel over REST.
@@ -388,18 +376,18 @@ func (c *MattermostClient) handleChannelDeleted(channelID string) {
 	}
 	log := c.lifecycleLogger()
 	c.lifecycleMu.Lock()
-	if c.deletedChannels[channelID] || c.pendingChecks[channelID] {
+	if _, committed := c.deletedChannels[channelID]; committed || c.pendingChecks[channelID] != 0 {
 		c.lifecycleMu.Unlock()
 		return
 	}
 	gen := c.bumpChannelGenerationLocked(channelID)
 	if c.pendingChecks == nil {
-		c.pendingChecks = make(map[string]bool)
+		c.pendingChecks = make(map[string]uint64)
 	}
-	c.pendingChecks[channelID] = true
+	c.pendingChecks[channelID] = gen
 	c.lifecycleMu.Unlock()
 	if ok, reason := c.deferredDeletionSupported(); !ok {
-		c.clearCheckQueued(channelID)
+		c.clearCheckQueued(channelID, gen)
 		log.Warn().
 			Str("channel_id", channelID).
 			Str("reason", reason).
@@ -425,7 +413,7 @@ func (c *MattermostClient) handleChannelDeleted(channelID string) {
 	// channel for the rest of the process, because Mattermost sends
 	// channel_deleted once, so release it and let a later hint try again.
 	// Nothing is re-queued here: re-queueing on failure would spin.
-	c.clearCheckQueued(channelID)
+	c.clearCheckQueued(channelID, gen)
 	log.Warn().
 		Err(res.Error).
 		Str("channel_id", channelID).
@@ -454,11 +442,11 @@ func (c *MattermostClient) handleChannelDeleted(channelID string) {
 // finished.
 func (c *MattermostClient) applyDeferredChannelDelete(ctx context.Context, sink portalDeleteSink, ev mmChannelDeleteCheckEvent) deferredDeleteResult {
 	log := zerolog.Ctx(ctx)
+	// Keep the slot through the probe so a new poll cannot supersede this check.
+	defer c.clearCheckQueued(ev.channelID, ev.generation)
 	if sink == nil {
 		return deferredDeleteResult{Reason: "no-portal-sink"}
 	}
-	// This check is being consumed, so it no longer holds the per-channel slot.
-	c.clearCheckQueued(ev.channelID)
 
 	if ok, reason := c.deferredDeletionSupported(); !ok {
 		log.Warn().
@@ -521,12 +509,12 @@ func (c *MattermostClient) applyDeferredChannelDelete(ctx context.Context, sink 
 	// The only destructive call in this file, and it goes through the
 	// framework's own room deletion path. No event is re-queued.
 	res := sink.HandleRemoteChatDelete(ctx, c.UserLogin, &mmChatDeleteEvent{portalKey: ev.portalKey})
+	c.finishChannelDelete(ev.channelID, ev.generation, res.Success)
 	if !res.Success {
 		// The framework refused the deletion, so the room is still there. The
 		// commit above is undone: keeping the mark would suppress every later
 		// attempt for the life of the process. The portal is preserved, which
 		// is the fail-closed outcome.
-		c.clearChannelDeleted(ev.channelID)
 		log.Error().
 			Err(res.Error).
 			Str("channel_id", ev.channelID).

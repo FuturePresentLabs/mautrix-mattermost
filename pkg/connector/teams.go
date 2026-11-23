@@ -30,6 +30,17 @@ func teamPortalID(teamID string) networkid.PortalID {
 	return networkid.PortalID(teamPortalPrefix + teamID)
 }
 
+// teamPortalKey matches the framework's channel-parent lookup.
+func (c *MattermostClient) teamPortalKey(teamID string) networkid.PortalKey {
+	key := networkid.PortalKey{ID: teamPortalID(teamID)}
+	if c.UserLogin != nil {
+		if br := c.UserLogin.Bridge; br != nil && br.Config != nil && br.Config.SplitPortals {
+			key.Receiver = c.receiverID()
+		}
+	}
+	return key
+}
+
 // teamIDFromPortal returns the team ID of a team space portal ID.
 func teamIDFromPortal(id networkid.PortalID) (string, bool) {
 	s := string(id)
@@ -96,7 +107,7 @@ func (c *MattermostClient) syncTeams(teams []*mattermost.Team) {
 		}
 		c.clearSpaceParents(team.ID)
 		c.queueEvent(&mmChatDeleteEvent{
-			portalKey: networkid.PortalKey{ID: teamPortalID(team.ID), Receiver: c.UserLogin.ID},
+			portalKey: c.teamPortalKey(team.ID),
 		})
 	}
 }
@@ -128,7 +139,7 @@ func (c *MattermostClient) teamInfo(team *mattermost.Team) *bridgev2.ChatInfo {
 	if name == "" {
 		name = team.Name
 	}
-	self := bridgev2.EventSender{IsFromMe: true, SenderLogin: c.UserLogin.ID, Sender: networkid.UserID(c.UserID)}
+	self := bridgev2.EventSender{IsFromMe: true, SenderLogin: c.receiverID(), Sender: networkid.UserID(c.UserID)}
 	return &bridgev2.ChatInfo{
 		Name:   &name,
 		Avatar: c.teamAvatar(team),
@@ -181,7 +192,7 @@ func (c *MattermostClient) queueTeamResync(team *mattermost.Team) {
 		EventMeta: simplevent.EventMeta{
 			Type:         bridgev2.RemoteEventChatResync,
 			CreatePortal: true,
-			PortalKey:    networkid.PortalKey{ID: teamPortalID(team.ID), Receiver: c.UserLogin.ID},
+			PortalKey:    c.teamPortalKey(team.ID),
 		},
 		ChatInfo: info,
 	})

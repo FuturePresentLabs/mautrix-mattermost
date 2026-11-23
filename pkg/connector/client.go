@@ -93,12 +93,11 @@ type MattermostClient struct {
 	// channelGen orders lifecycle events per channel: a newer create/update/
 	// delete/restore invalidates checks and probes started for older events.
 	channelGen map[string]uint64
-	// pendingChecks records channels with a queued (not yet dequeued) deletion
-	// check, so a burst of channel_deleted hints cannot queue more than one
-	// bounded probe per channel and generation.
-	pendingChecks map[string]bool
-	// deletedChannels records portals whose deletion was committed in this
-	// process, so a duplicate hint cannot delete twice.
+	// pendingChecks records the generation of each queued or running deletion
+	// check so repeated hints do not supersede it.
+	pendingChecks map[string]uint64
+	// deletedChannels records committed deletions. A true value means the
+	// framework finished deleting the portal.
 	deletedChannels map[string]bool
 
 	// previews caches resolved Mattermost permalink cards. A message must never

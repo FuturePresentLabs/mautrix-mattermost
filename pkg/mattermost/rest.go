@@ -243,7 +243,6 @@ func GetChannelsForUserIncludingArchived(serverURL, token, userID, teamID string
 	return channels, nil
 }
 
-// GetChannel fetches a single channel by ID.
 // GetPost fetches a single post by ID. It is used to build previews for
 // permalinks that were pasted into a message.
 func GetPost(serverURL, token, postID string) (*Post, error) {
@@ -254,6 +253,7 @@ func GetPost(serverURL, token, postID string) (*Post, error) {
 	return &p, nil
 }
 
+// GetChannel fetches a single channel by ID.
 func GetChannel(serverURL, token, channelID string) (*Channel, error) {
 	var ch Channel
 	if err := doGet(serverURL, token, "/api/v4/channels/"+channelID, &ch); err != nil {

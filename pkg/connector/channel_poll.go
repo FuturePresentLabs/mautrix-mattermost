@@ -31,7 +31,7 @@ import (
 //     previous baseline: a partial answer is not evidence that a channel vanished.
 //   - A channel that disappears is only a hint. It goes through the same
 //     probe-gated, dequeue-time deletion check as a channel_deleted event.
-//     A 403, 5xx or other ambiguous probe response preserves the room.
+//     An inconclusive check preserves the room and a later poll can retry.
 
 // lifecyclePollInterval is how often channel state is reconciled.
 const lifecyclePollInterval = 30 * time.Second
@@ -189,6 +189,13 @@ func (c *MattermostClient) pollChannelLifecycle(prev map[string]bool) map[string
 	if prev != nil {
 		reconnect := false
 		for _, tr := range diffChannelLifecycle(prev, cur) {
+			if tr.Kind == lifecycleGone {
+				if c.isChannelDeleted(tr.ChannelID) {
+					continue
+				}
+				// Keep the last listed state until the dequeue-time deletion succeeds.
+				cur[tr.ChannelID] = prev[tr.ChannelID]
+			}
 			if c.applyLifecycleTransition(tr, channels[tr.ChannelID]) {
 				reconnect = true
 			}

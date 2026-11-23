@@ -63,23 +63,43 @@ func (c *MattermostClient) GetCapabilities(ctx context.Context, portal *bridgev2
 	}
 }
 
-// outboundRootID selects the flat Mattermost thread root for a Matrix message.
-func outboundRootID(msg *bridgev2.MatrixMessage) string {
+// outboundRootTarget prefers the explicit Matrix thread over the reply target.
+func outboundRootTarget(msg *bridgev2.MatrixMessage) *database.Message {
 	if msg == nil {
-		return ""
+		return nil
 	}
 	for _, target := range []*database.Message{msg.ThreadRoot, msg.ReplyTo} {
-		if target != nil && isCommandMessage(target.ID) && target.ThreadRoot == "" {
-			continue // a command has no post to reply to
-		}
-		if target != nil {
-			if target.ThreadRoot != "" {
-				return string(target.ThreadRoot)
-			}
-			return string(target.ID)
+		if target != nil && (target.ThreadRoot != "" || !isCommandMessage(target.ID)) {
+			return target
 		}
 	}
+	return nil
+}
+
+// outboundRootID selects the flat Mattermost thread root using stored data.
+func outboundRootID(msg *bridgev2.MatrixMessage) string {
+	if target := outboundRootTarget(msg); target != nil {
+		if target.ThreadRoot != "" {
+			return string(target.ThreadRoot)
+		}
+		return string(target.ID)
+	}
 	return ""
+}
+
+func needsReplyRootLookup(msg *bridgev2.MatrixMessage) bool {
+	target := outboundRootTarget(msg)
+	return target != nil && target == msg.ReplyTo && target != msg.ThreadRoot &&
+		target.ThreadRoot == "" && target.ID != ""
+}
+
+// resolveReplyRoot uses the fetched post when available and otherwise keeps
+// the stored reply target as the fallback.
+func resolveReplyRoot(rootID string, post *mattermost.Post) string {
+	if post != nil && post.RootID != "" {
+		return post.RootID
+	}
+	return rootID
 }
 
 // HandleMatrixMessage bridges a message from Matrix → Mattermost.
@@ -100,7 +120,6 @@ func (c *MattermostClient) HandleMatrixMessage(ctx context.Context, msg *bridgev
 		return nil, wrapSendErr(fmt.Errorf("team spaces have no Mattermost channel to post in"))
 	}
 	channelID := string(msg.Portal.ID)
-	rootID := outboundRootID(msg)
 
 	switch content.MsgType {
 	case event.MsgText, event.MsgNotice, event.MsgEmote:
@@ -108,23 +127,18 @@ func (c *MattermostClient) HandleMatrixMessage(ctx context.Context, msg *bridgev
 		body := c.outboundMarkdown(ctx, content)
 		if escaped, ok := escapedSlash(body); ok {
 			body = escaped
-		} else if resp, handled, err := c.handleSlashCommand(ctx, msg, channelID, rootID, body); handled {
+		} else if resp, handled, err := c.handleSlashCommand(ctx, msg, channelID, body); handled {
 			return resp, err
 		}
 		if content.MsgType == event.MsgEmote {
 			body = "_" + body + "_"
 		}
 		zerolog.Ctx(ctx).Debug().Str("channel", channelID).Msg("Sending message to Mattermost")
-		postID, err := c.sendPost(ctx, msg, mattermost.NewPost{ChannelID: channelID, Message: body, RootID: rootID})
+		dbMessage, err := c.sendPost(ctx, msg, mattermost.NewPost{ChannelID: channelID, Message: body})
 		if err != nil {
 			return nil, wrapSendErr(err)
 		}
-		return &bridgev2.MatrixMessageResponse{
-			DB: &database.Message{
-				ID:       networkid.MessageID(postID),
-				SenderID: networkid.UserID(c.UserID),
-			},
-		}, nil
+		return &bridgev2.MatrixMessageResponse{DB: dbMessage}, nil
 
 	case event.MsgImage, event.MsgVideo, event.MsgAudio, event.MsgFile, event.CapMsgSticker:
 		mxcURI := content.URL
@@ -169,16 +183,11 @@ func (c *MattermostClient) HandleMatrixMessage(ctx context.Context, msg *bridgev
 			return nil, wrapSendErr(fmt.Errorf("failed to upload media: %w", err))
 		}
 
-		postID, err := c.sendPost(ctx, msg, mattermost.NewPost{ChannelID: channelID, Message: mediaCaption(content), RootID: rootID, FileIDs: []string{fileID}})
+		dbMessage, err := c.sendPost(ctx, msg, mattermost.NewPost{ChannelID: channelID, Message: mediaCaption(content), FileIDs: []string{fileID}})
 		if err != nil {
 			return nil, wrapSendErr(err)
 		}
-		return &bridgev2.MatrixMessageResponse{
-			DB: &database.Message{
-				ID:       networkid.MessageID(postID),
-				SenderID: networkid.UserID(c.UserID),
-			},
-		}, nil
+		return &bridgev2.MatrixMessageResponse{DB: dbMessage}, nil
 
 	default:
 		return nil, wrapSendErr(fmt.Errorf("unsupported message type: %s", content.MsgType))

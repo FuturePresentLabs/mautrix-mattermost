@@ -268,3 +268,36 @@ func TestDeliberateReconnectIsNotReportedAsDisconnect(t *testing.T) {
 		}
 	})
 }
+
+func TestPollRetriesMissingChannelUntilDeletionApplied(t *testing.T) {
+	r := newPollRig(t)
+	r.listing = chans("room")
+	snap := r.client.pollChannelLifecycle(nil)
+	delete(r.listing, "room")
+
+	calls := 0
+	r.client.probeChannelFn = func(_, _, channelID string) mattermost.ChannelProbe {
+		calls++
+		if calls == 1 {
+			return transportErrProbe()
+		}
+		// A poll that overlaps a slow probe must leave that check in charge.
+		snap = r.client.pollChannelLifecycle(snap)
+		if r.events.len() != 0 {
+			t.Error("poll queued a duplicate deletion check during a probe")
+		}
+		return authoritativeNotFoundProbe(channelID)
+	}
+	snap = r.client.pollChannelLifecycle(snap)
+	if results := r.dequeue(t); len(results) != 1 || results[0].Applied {
+		t.Fatalf("first probe should preserve the portal: %+v", results)
+	}
+	snap = r.client.pollChannelLifecycle(snap)
+	if results := r.dequeue(t); len(results) != 1 || !results[0].Applied {
+		t.Fatalf("later poll should apply the proven deletion: %+v", results)
+	}
+	snap = r.client.pollChannelLifecycle(snap)
+	if _, retained := snap["room"]; retained || r.events.len() != 0 || calls != 2 {
+		t.Fatalf("applied deletion still tracked: snapshot=%v events=%d probes=%d", snap, r.events.len(), calls)
+	}
+}

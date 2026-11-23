@@ -14,6 +14,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
 
 	"github.com/bostrot/mautrix-mattermost/pkg/mattermost"
 )
@@ -25,6 +26,7 @@ type quoteServer struct {
 	posts       map[string]*mattermost.Post
 	plugin      bool
 	pluginCalls int
+	postReads   []string
 	created     []map[string]any
 	patched     []map[string]any
 	put         []map[string]any
@@ -55,9 +57,15 @@ func newQuoteServer(t *testing.T) (*quoteServer, *httptest.Server) {
 			}
 		case r.URL.Path == "/api/v4/users/u1":
 			_ = json.NewEncoder(w).Encode(mattermost.User{ID: "u1", Username: "erin", FirstName: "Erin", LastName: "Example"})
+		case r.Method == "POST" && r.URL.Path == "/api/v4/files":
+			_, _ = w.Write([]byte(`{"file_infos":[{"id":"uploaded"}]}`))
 		case r.Method == "POST" && r.URL.Path == "/api/v4/posts":
 			s.created = append(s.created, body)
-			_, _ = w.Write([]byte(`{"id":"newpost"}`))
+			root, _ := body["root_id"].(string)
+			if body["message"] == "server-adjusted root" {
+				root = "confirmed-root"
+			}
+			_ = json.NewEncoder(w).Encode(mattermost.Post{ID: "newpost", RootID: root})
 		case r.Method == "PUT" && strings.HasSuffix(r.URL.Path, "/patch"):
 			s.patched = append(s.patched, body)
 			_, _ = w.Write([]byte(`{}`))
@@ -65,7 +73,9 @@ func newQuoteServer(t *testing.T) (*quoteServer, *httptest.Server) {
 			s.put = append(s.put, body)
 			_, _ = w.Write([]byte(`{}`))
 		case strings.HasPrefix(r.URL.Path, "/api/v4/posts/"):
-			if p, ok := s.posts[strings.TrimPrefix(r.URL.Path, "/api/v4/posts/")]; ok {
+			postID := strings.TrimPrefix(r.URL.Path, "/api/v4/posts/")
+			s.postReads = append(s.postReads, postID)
+			if p, ok := s.posts[postID]; ok {
 				_ = json.NewEncoder(w).Encode(p)
 				return
 			}
@@ -147,33 +157,6 @@ func TestRepliesFallBackToThreads(t *testing.T) {
 	}
 	if b := send("to a command", &database.Message{ID: networkid.MessageID(commandMessagePrefix + "x")}); b["type"] != nil {
 		t.Fatalf("command target: %v", b)
-	}
-}
-
-func TestCommandRepliesAreNotQuoted(t *testing.T) {
-	s, srv := newQuoteServer(t)
-	cmdID := commandMessagePrefix + "x"
-	s.posts[cmdID] = &mattermost.Post{ID: cmdID, UserID: "u1", Message: "/meet"}
-	c := quoteClient(srv)
-	c.quotedRepliesFn = func() bool { return true }
-	if _, ok := c.outboundQuote(context.Background(), replyMsg("x", &database.Message{ID: networkid.MessageID(cmdID)}, nil), "ch1", "x", nil); ok {
-		t.Fatal("a reply to a command became a quoted reply")
-	}
-}
-
-func TestMediaReplyIsQuoted(t *testing.T) {
-	_, srv := newQuoteServer(t)
-	c := quoteClient(srv)
-	c.quotedRepliesFn = func() bool { return true }
-	np, ok := c.outboundQuote(context.Background(), replyMsg("", &database.Message{ID: "target"}, nil), "ch1", "caption", []string{"f1"})
-	if !ok || np.FileIDs[0] != "f1" || np.Message != "> **Erin Example**\n> Shall we meet tomorrow?\n\ncaption" || np.ChannelID != "ch1" {
-		t.Fatalf("%+v", np)
-	}
-	// Media posts go through sendPost, as text does.
-	s := c
-	id, err := s.sendPost(context.Background(), replyMsg("", &database.Message{ID: "target"}, nil), mattermost.NewPost{ChannelID: "ch1", Message: "caption", RootID: "target", FileIDs: []string{"f1"}})
-	if err != nil || id != "newpost" {
-		t.Fatalf("%q %v", id, err)
 	}
 }
 
@@ -274,5 +257,83 @@ func TestEditKeepsQuote(t *testing.T) {
 func TestQuoteAuthor(t *testing.T) {
 	if quoteAuthor(&mattermost.User{Username: "erin", FirstName: "Erin"}) != "Erin" || quoteAuthor(&mattermost.User{Username: "erin"}) != "erin" {
 		t.Fatal("author name")
+	}
+}
+
+type outboundMediaBot struct {
+	bridgev2.MatrixAPI
+}
+
+func (outboundMediaBot) DownloadMedia(context.Context, id.ContentURIString, *event.EncryptedFileInfo) ([]byte, error) {
+	return []byte("attachment contents"), nil
+}
+
+func TestHandleMatrixReplyThreadRoot(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		reply, thread       *database.Message
+		plugin, media, read bool
+		requestRoot, dbRoot string
+	}{
+		{name: "legacy reply", reply: &database.Message{ID: "target"}, read: true, requestRoot: "outer", dbRoot: "outer"},
+		{name: "stored root", reply: &database.Message{ID: "target", ThreadRoot: "stored"}, requestRoot: "stored", dbRoot: "stored"},
+		{name: "explicit thread", reply: &database.Message{ID: "target"}, thread: &database.Message{ID: "explicit"}, requestRoot: "explicit", dbRoot: "explicit"},
+		{name: "lookup failure", reply: &database.Message{ID: "missing"}, read: true, requestRoot: "missing", dbRoot: "missing"},
+		{name: "command", reply: &database.Message{ID: commandMessagePrefix + "example"}, plugin: true},
+		{name: "command with stored root", reply: &database.Message{ID: commandMessagePrefix + "example", ThreadRoot: "stored"}, plugin: true, requestRoot: "stored", dbRoot: "stored"},
+		{name: "native media reply", reply: &database.Message{ID: "target"}, media: true, read: true, requestRoot: "outer", dbRoot: "outer"},
+		{name: "quoted plain reply", reply: &database.Message{ID: "target"}, plugin: true, read: true},
+		{name: "quoted media reply", reply: &database.Message{ID: "target", ThreadRoot: "stored"}, plugin: true, media: true, read: true},
+		{name: "quoted in thread", reply: &database.Message{ID: "target"}, thread: &database.Message{ID: "explicit"}, plugin: true, read: true, requestRoot: "explicit", dbRoot: "explicit"},
+		{name: "quote lookup failure", reply: &database.Message{ID: "missing"}, plugin: true, read: true, requestRoot: "missing", dbRoot: "missing"},
+		{name: "server-adjusted root", reply: &database.Message{ID: "target", ThreadRoot: "stored"}, requestRoot: "stored", dbRoot: "confirmed-root"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, srv := newQuoteServer(t)
+			s.posts["target"].RootID = "outer"
+			c := quoteClient(srv)
+			c.quotedRepliesFn = func() bool { return tc.plugin }
+			msg := replyMsg(tc.name, tc.reply, tc.thread)
+			if tc.media {
+				c.UserLogin = &bridgev2.UserLogin{Bridge: &bridgev2.Bridge{Bot: outboundMediaBot{}}}
+				msg.Content.MsgType = event.MsgFile
+				msg.Content.FileName = "example.txt"
+				msg.Content.URL = "mxc://example.test/file"
+			}
+			resp, err := c.HandleMatrixMessage(context.Background(), msg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if len(s.created) != 1 {
+				t.Fatalf("created posts = %v", s.created)
+			}
+			post := s.created[0]
+			if root, _ := post["root_id"].(string); root != tc.requestRoot {
+				t.Errorf("sent root = %q, want %q", root, tc.requestRoot)
+			}
+			if resp.DB.ID != "newpost" || resp.DB.SenderID != "me" || string(resp.DB.ThreadRoot) != tc.dbRoot {
+				t.Errorf("DB message = %+v, want newpost from me with root %q", resp.DB, tc.dbRoot)
+			}
+			if tc.read {
+				if len(s.postReads) != 1 || s.postReads[0] != string(tc.reply.ID) {
+					t.Errorf("post reads = %v, want one read of %q", s.postReads, tc.reply.ID)
+				}
+			} else if len(s.postReads) != 0 {
+				t.Errorf("unexpected post reads: %v", s.postReads)
+			}
+			if tc.plugin && tc.reply.ID == "target" && post["type"] != mattermost.QuotedReplyPostType {
+				t.Errorf("post type = %v, want quoted reply", post["type"])
+			}
+			if tc.media {
+				if tc.plugin && post["message"] != "> **Erin Example**\n> Shall we meet tomorrow?\n\n"+tc.name {
+					t.Errorf("quoted media caption = %q", post["message"])
+				}
+				if files, ok := post["file_ids"].([]any); !ok || len(files) != 1 || files[0] != "uploaded" {
+					t.Errorf("file_ids = %v, want uploaded attachment", post["file_ids"])
+				}
+			}
+		})
 	}
 }

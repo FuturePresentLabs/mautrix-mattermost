@@ -124,7 +124,7 @@ func (c *MattermostClient) knownCommand(ctx context.Context, teamID, trigger str
 // handleSlashCommand runs content as a Mattermost command when it is one. It
 // returns handled=false for ordinary text, which is then posted. body is the
 // outbound Markdown, with mention pills as "@username".
-func (c *MattermostClient) handleSlashCommand(ctx context.Context, msg *bridgev2.MatrixMessage, channelID, rootID, body string) (*bridgev2.MatrixMessageResponse, bool, error) {
+func (c *MattermostClient) handleSlashCommand(ctx context.Context, msg *bridgev2.MatrixMessage, channelID, body string) (*bridgev2.MatrixMessageResponse, bool, error) {
 	if msg.Content.MsgType != event.MsgText {
 		return nil, false, nil
 	}
@@ -137,6 +137,10 @@ func (c *MattermostClient) handleSlashCommand(ctx context.Context, msg *bridgev2
 		return nil, false, nil
 	}
 	zerolog.Ctx(ctx).Debug().Str("channel", channelID).Str("trigger", trigger).Msg("Running Mattermost slash command")
+	rootID := outboundRootID(msg)
+	if needsReplyRootLookup(msg) {
+		rootID = resolveReplyRoot(rootID, c.fetchReplyTarget(ctx, msg.ReplyTo.ID))
+	}
 	resp, err := c.executeCommand(channelID, teamID, rootID, strings.TrimSpace(body))
 	if err != nil {
 		var httpErr *mattermost.HTTPError
