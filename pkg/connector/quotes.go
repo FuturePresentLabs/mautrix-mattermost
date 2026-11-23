@@ -7,6 +7,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
 	"github.com/bostrot/mautrix-mattermost/pkg/mattermost"
@@ -60,37 +61,48 @@ func (c *MattermostClient) channelReplyPluginActive() bool {
 	return active
 }
 
-// outboundQuote turns a Matrix reply into a quoted reply: the post to send
-// and true, or false to send it as before. A reply whose target cannot be
-// read is sent as before rather than failing.
-func (c *MattermostClient) outboundQuote(ctx context.Context, msg *bridgev2.MatrixMessage, channelID, body string, fileIDs []string) (mattermost.NewPost, bool) {
-	if msg == nil || msg.ReplyTo == nil || isCommandMessage(msg.ReplyTo.ID) || !c.quotedRepliesEnabled() {
-		return mattermost.NewPost{}, false
+// fetchReplyTarget reads the post once for root resolution, quote construction,
+// or both. An unavailable target leaves the stored root usable as a fallback.
+func (c *MattermostClient) fetchReplyTarget(ctx context.Context, targetID networkid.MessageID) *mattermost.Post {
+	post, err := mattermost.GetPost(c.serverURL(), c.Token, string(targetID))
+	if err != nil {
+		zerolog.Ctx(ctx).Warn().Err(err).Str("reply_to", string(targetID)).Msg("Could not read the message replied to")
+		return nil
 	}
-	target, err := mattermost.GetPost(c.serverURL(), c.Token, string(msg.ReplyTo.ID))
-	if err != nil || target == nil || target.DeleteAt != 0 {
-		zerolog.Ctx(ctx).Warn().Err(err).Str("reply_to", string(msg.ReplyTo.ID)).Msg("Could not read the message replied to; sending a thread reply")
-		return mattermost.NewPost{}, false
-	}
-	author := ""
-	if u, err := mattermost.GetUser(c.serverURL(), c.Token, target.UserID); err == nil && u != nil {
-		author = quoteAuthor(u)
-	}
-	message, postType, props := mattermost.QuotedReply(target, author, body)
-	rootID := ""
-	if msg.ThreadRoot != nil {
-		rootID = outboundRootID(msg) // a reply inside a thread stays in it
-	}
-	return mattermost.NewPost{ChannelID: channelID, Message: message, RootID: rootID, FileIDs: fileIDs, Type: postType, Props: props}, true
+	return post
 }
 
-// sendPost creates a post for a Matrix message, as a quoted reply when the
-// message is a reply that can be quoted.
-func (c *MattermostClient) sendPost(ctx context.Context, msg *bridgev2.MatrixMessage, np mattermost.NewPost) (string, error) {
-	if quoted, ok := c.outboundQuote(ctx, msg, np.ChannelID, np.Message, np.FileIDs); ok {
-		np = quoted
+// sendPost creates a post for a Matrix message, quoting the reply target when
+// available. The stored thread root comes from the created post.
+func (c *MattermostClient) sendPost(ctx context.Context, msg *bridgev2.MatrixMessage, np mattermost.NewPost) (*database.Message, error) {
+	np.RootID = outboundRootID(msg)
+	quote := msg.ReplyTo != nil && msg.ReplyTo.ID != "" && !isCommandMessage(msg.ReplyTo.ID) && c.quotedRepliesEnabled()
+	lookupRoot := needsReplyRootLookup(msg)
+	if quote || lookupRoot {
+		target := c.fetchReplyTarget(ctx, msg.ReplyTo.ID)
+		if lookupRoot {
+			np.RootID = resolveReplyRoot(np.RootID, target)
+		}
+		if quote && target != nil && target.DeleteAt == 0 {
+			author := ""
+			if u, err := mattermost.GetUser(c.serverURL(), c.Token, target.UserID); err == nil && u != nil {
+				author = quoteAuthor(u)
+			}
+			np.Message, np.Type, np.Props = mattermost.QuotedReply(target, author, np.Message)
+			if msg.ThreadRoot == nil {
+				np.RootID = "" // a quoted reply outside a Matrix thread is a channel post
+			}
+		}
 	}
-	return mattermost.SendPostWith(c.serverURL(), c.Token, np)
+	post, err := mattermost.CreatePost(c.serverURL(), c.Token, np)
+	if err != nil {
+		return nil, err
+	}
+	return &database.Message{
+		ID:         networkid.MessageID(post.ID),
+		SenderID:   networkid.UserID(c.UserID),
+		ThreadRoot: networkid.MessageID(post.RootID),
+	}, nil
 }
 
 // quoteAuthor names a quoted author as the plugin does: full name, else

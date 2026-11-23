@@ -28,6 +28,15 @@ type NewPost struct {
 
 // SendPostWith creates a post and returns its ID.
 func SendPostWith(serverURL, token string, np NewPost) (string, error) {
+	post, err := CreatePost(serverURL, token, np)
+	if err != nil {
+		return "", err
+	}
+	return post.ID, nil
+}
+
+// CreatePost creates a post and returns the server's representation.
+func CreatePost(serverURL, token string, np NewPost) (*Post, error) {
 	body := map[string]any{
 		"channel_id": np.ChannelID,
 		"message":    np.Message,
@@ -48,9 +57,9 @@ func SendPostWith(serverURL, token string, np NewPost) (string, error) {
 
 	var post Post
 	if err := doPost(serverURL, token, "/api/v4/posts", body, &post); err != nil {
-		return "", err
+		return nil, err
 	}
-	return post.ID, nil
+	return &post, nil
 }
 
 // EditPost updates the message text of an existing post.
