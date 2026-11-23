@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/bridgeconfig"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
@@ -268,5 +269,49 @@ func TestSpaceWithRoomsInsideIsNotDeleted(t *testing.T) {
 	c.syncTeams([]*mattermost.Team{{ID: "t3"}})
 	if len(queued) != 0 {
 		t.Fatalf("deleted %v without knowing whether rooms are inside", queued)
+	}
+}
+
+func TestQueuedTeamPortalKey(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		split bool
+		want  networkid.UserLoginID
+	}{
+		{name: "shared"},
+		{name: "split", split: true, want: "login"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := teamClient("")
+			config := &Config{}
+			c.UserLogin.Bridge = &bridgev2.Bridge{
+				Network: &MattermostConnector{Config: config},
+				Config:  &bridgeconfig.BridgeConfig{SplitPortals: tc.split},
+			}
+			c.spaceChildrenFn = func(string) bool { return false }
+			var queued []bridgev2.RemoteEvent
+			c.queueRemoteEventFn = func(ev bridgev2.RemoteEvent) bridgev2.EventHandlingResult {
+				queued = append(queued, ev)
+				return bridgev2.EventHandlingResultQueued
+			}
+			team := &mattermost.Team{ID: "example"}
+			c.queueTeamResync(team)
+			if len(queued) != 0 {
+				t.Fatalf("team spaces created with default config: %v", queued)
+			}
+			config.TeamSpaces = true
+			c.queueTeamResync(team)
+			config.TeamSpaces = false
+			c.syncTeams([]*mattermost.Team{team})
+			if len(queued) != 2 {
+				t.Fatalf("got %d events, want resync and delete", len(queued))
+			}
+			want := networkid.PortalKey{ID: "team:example", Receiver: tc.want}
+			for i, kind := range []bridgev2.RemoteEventType{bridgev2.RemoteEventChatResync, bridgev2.RemoteEventChatDelete} {
+				if ev := queued[i]; ev.GetPortalKey() != want || ev.GetType() != kind {
+					t.Errorf("got %v for %v, want %v for %v", ev.GetType(), ev.GetPortalKey(), kind, want)
+				}
+			}
+		})
 	}
 }
