@@ -19,7 +19,7 @@ def main():
     text = f"Mautrix-Mattermost {tag} released: {release}"
     if os.environ.get('NOTIFY_TEST') == '1':
         text = f"Test notification (no new release): {release}"
-    request = urllib.request.Request(url, data=json.dumps({'text': text}).encode(), headers={
+    request = urllib.request.Request(url, data=json.dumps({'text': text, 'username': 'Mautrix Release Bot'}).encode(), headers={
         'Content-Type': 'application/json',
         'User-Agent': 'Mozilla/5.0 (compatible; release-notifier/1.0)',
     })
