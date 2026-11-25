@@ -154,7 +154,8 @@ func (c *MattermostClient) resolvePermalink(postID string) *quotedPost {
 		return nil
 	}
 	post, err := mattermost.GetPost(c.serverURL(), c.Token, postID)
-	if err != nil || post == nil || post.DeleteAt != 0 {
+	if err != nil || post == nil || post.DeleteAt != 0 || post.IsBurnOnRead() {
+		// A burn-on-read post is never quoted or cached: the cache would outlive its reveal.
 		c.storeQuote(postID, nil) // remember the failure, briefly
 		return nil
 	}

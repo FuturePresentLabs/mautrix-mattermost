@@ -57,6 +57,41 @@ func (m *MattermostConnector) GetDBMetaTypes() database.MetaTypes {
 		UserLogin: func() any {
 			return &UserLoginMetadata{}
 		},
+		Message: func() any { return &MessageMetadata{} },
+	}
+}
+
+// MessageMetadata is the connector's own state for one bridged post. It holds
+// only presentation state: whether the acknowledgement prompt is currently
+// shown. The post's text is never copied here, so no additional message
+// plaintext is retained, and a burn-on-read reveal is never stored twice.
+type MessageMetadata struct {
+	// AckPromptHidden says whether the instruction is currently part of the
+	// event's visible body.
+	AckPromptHidden bool `json:"ack_prompt_hidden,omitempty"`
+	// AckPromptTracked distinguishes a row written by this bridge from one
+	// converted before the state existed. Only tracked rows may be edited, so
+	// legacy messages are never rewritten on a guess.
+	AckPromptTracked bool `json:"ack_prompt_tracked,omitempty"`
+	// AckPromptUnsafe marks a body the bridge cannot rebuild faithfully from a
+	// later post snapshot: media captions, quoted replies, link previews, and
+	// revealed burn-on-read text. It is recorded at conversion because a later
+	// snapshot can omit the files or props that made rebuild unsafe.
+	AckPromptUnsafe bool `json:"ack_prompt_unsafe,omitempty"`
+	// AckPromptRevealedBurn marks the one unsafe body that has a separate,
+	// strictly validated rebuild path: the text this account revealed from a
+	// burn-on-read post. The reveal path alone sets it, so media, quotes and
+	// previews can never fall through that guard.
+	AckPromptRevealedBurn bool `json:"ack_prompt_revealed_burn,omitempty"`
+}
+
+// CopyFrom merges metadata from an edit part into the row being edited.
+func (m *MessageMetadata) CopyFrom(other any) {
+	if o, ok := other.(*MessageMetadata); ok && o != nil {
+		m.AckPromptHidden = o.AckPromptHidden
+		m.AckPromptTracked = o.AckPromptTracked
+		m.AckPromptUnsafe = o.AckPromptUnsafe
+		m.AckPromptRevealedBurn = o.AckPromptRevealedBurn
 	}
 }
 

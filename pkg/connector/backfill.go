@@ -8,6 +8,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
 
 	"github.com/bostrot/mautrix-mattermost/pkg/mattermost"
 )
@@ -92,6 +93,7 @@ func (c *MattermostClient) fetchChannelMessages(ctx context.Context, params brid
 	if !params.Forward && len(pl.Order) > 0 {
 		resp.Cursor = networkid.PaginationCursor(pl.Order[len(pl.Order)-1])
 	}
+	c.backfillAcknowledgements(ctx, params, resp, pl.Posts)
 	return resp, nil
 }
 
@@ -112,7 +114,7 @@ func (c *MattermostClient) fetchThreadMessages(ctx context.Context, params bridg
 		msgs = append(msgs, c.newBackfillMessage(ctx, intent, params.Portal, post, params.ThreadRoot))
 	}
 
-	return &bridgev2.FetchMessagesResponse{
+	resp := &bridgev2.FetchMessagesResponse{
 		Messages: msgs,
 		// No cursor and no truncation: the whole thread was returned. HasMore
 		// must stay false because this endpoint cannot paginate.
@@ -121,7 +123,11 @@ func (c *MattermostClient) fetchThreadMessages(ctx context.Context, params bridg
 		// A thread can be backfilled more than once (e.g. re-synced channel
 		// batches), so let the bridge drop replies that are already stored.
 		AggressiveDeduplication: true,
-	}, nil
+	}
+	if pl != nil {
+		c.backfillAcknowledgements(ctx, params, resp, pl.Posts)
+	}
+	return resp, nil
 }
 
 // orderedThreadPosts flattens a thread PostList into a deduplicated,
@@ -176,15 +182,26 @@ func (c *MattermostClient) newBackfillMessage(
 ) *bridgev2.BackfillMessage {
 	sender := c.postSender(post)
 
-	converted, err := c.convertPost(ctx, intent, portal.MXID, post)
+	// An empty portal (as in tests) has no room yet; conversion only needs the ID for uploads.
+	var roomID id.RoomID
+	if portal != nil && portal.Portal != nil {
+		roomID = portal.MXID
+	}
+	converted, err := c.convertPost(ctx, intent, roomID, post)
 	if err != nil || converted == nil || len(converted.Parts) == 0 {
 		_, postRoot := threadRelation(post)
+		var body string
+		if post.IsBurnOnRead() {
+			body = c.burnPlaceholder(post) // never the text
+		} else {
+			body = postMarkdown(post)
+		}
 		converted = &bridgev2.ConvertedMessage{
 			ThreadRoot: postRoot,
 			Parts: []*bridgev2.ConvertedMessagePart{{
 				ID:      networkid.PartID(""),
 				Type:    event.EventMessage,
-				Content: &event.MessageEventContent{MsgType: event.MsgText, Body: postMarkdown(post)},
+				Content: &event.MessageEventContent{MsgType: event.MsgText, Body: body},
 			}},
 		}
 	}
@@ -199,6 +216,9 @@ func (c *MattermostClient) newBackfillMessage(
 		ts = time.Now()
 	}
 
+	if post.IsBurnOnRead() && !converted.Disappear.DisappearAt.IsZero() {
+		c.trackBurnRemoval(post.ID, converted.Disappear.DisappearAt)
+	}
 	return &bridgev2.BackfillMessage{
 		ConvertedMessage: converted,
 		Sender:           sender,
@@ -248,7 +268,7 @@ func (c *MattermostClient) backfillReactions(post *mattermost.Post) []*bridgev2.
 	seen := make(map[reactionKey]bool, len(post.Metadata.Reactions))
 	out := make([]*bridgev2.BackfillReaction, 0, len(post.Metadata.Reactions))
 	for _, r := range post.Metadata.Reactions {
-		if r == nil || r.UserID == "" || r.EmojiName == "" || r.DeleteAt != 0 {
+		if r == nil || r.UserID == "" || r.EmojiName == "" || r.DeleteAt != 0 || isAckReaction(networkid.EmojiID(r.EmojiName)) {
 			continue
 		}
 		key := reactionKey{r.UserID, r.EmojiName}
@@ -257,13 +277,7 @@ func (c *MattermostClient) backfillReactions(post *mattermost.Post) []*bridgev2.
 		}
 		seen[key] = true
 
-		sender := bridgev2.EventSender{Sender: networkid.UserID(r.UserID)}
-		if c.UserID != "" && r.UserID == c.UserID {
-			sender.IsFromMe = true
-			if c.UserLogin != nil {
-				sender.SenderLogin = c.UserLogin.ID
-			}
-		}
+		sender := c.userSender(r.UserID)
 		var ts time.Time // zero: bridgev2 places it just after the message
 		if r.CreateAt > 0 {
 			ts = time.UnixMilli(r.CreateAt)

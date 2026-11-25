@@ -169,8 +169,14 @@ func (c *MattermostClient) postSender(post *mattermost.Post) bridgev2.EventSende
 	if post.IsSystem() {
 		return bridgev2.EventSender{}
 	}
-	isFromMe := c.UserID != "" && post.UserID == c.UserID
-	sender := bridgev2.EventSender{Sender: networkid.UserID(post.UserID), IsFromMe: isFromMe}
+	return c.userSender(post.UserID)
+}
+
+// userSender consistently attributes remote activity to the logged-in Matrix
+// user when it came from their Mattermost account, rather than their ghost.
+func (c *MattermostClient) userSender(userID string) bridgev2.EventSender {
+	isFromMe := c.UserID != "" && userID == c.UserID
+	sender := bridgev2.EventSender{Sender: networkid.UserID(userID), IsFromMe: isFromMe}
 	if isFromMe && c.UserLogin != nil {
 		sender.SenderLogin = c.UserLogin.ID
 	}

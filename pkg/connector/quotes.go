@@ -76,14 +76,15 @@ func (c *MattermostClient) fetchReplyTarget(ctx context.Context, targetID networ
 // available. The stored thread root comes from the created post.
 func (c *MattermostClient) sendPost(ctx context.Context, msg *bridgev2.MatrixMessage, np mattermost.NewPost) (*database.Message, error) {
 	np.RootID = outboundRootID(msg)
-	quote := msg.ReplyTo != nil && msg.ReplyTo.ID != "" && !isCommandMessage(msg.ReplyTo.ID) && c.quotedRepliesEnabled()
+	// A burn-on-read post keeps its own type, so it is never a quoted reply.
+	quote := np.Type != mattermost.PostTypeBurnOnRead && msg.ReplyTo != nil && msg.ReplyTo.ID != "" && !isCommandMessage(msg.ReplyTo.ID) && c.quotedRepliesEnabled()
 	lookupRoot := needsReplyRootLookup(msg)
 	if quote || lookupRoot {
 		target := c.fetchReplyTarget(ctx, msg.ReplyTo.ID)
 		if lookupRoot {
 			np.RootID = resolveReplyRoot(np.RootID, target)
 		}
-		if quote && target != nil && target.DeleteAt == 0 {
+		if quote && target != nil && target.DeleteAt == 0 && !target.IsBurnOnRead() {
 			author := ""
 			if u, err := mattermost.GetUser(c.serverURL(), c.Token, target.UserID); err == nil && u != nil {
 				author = quoteAuthor(u)

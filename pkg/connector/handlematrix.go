@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/rs/zerolog"
@@ -42,7 +43,7 @@ const mattermostMaxPostRunes = 16383
 
 // GetCapabilities returns the Matrix room features supported by this connector.
 func (c *MattermostClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
-	return &event.RoomFeatures{
+	features := &event.RoomFeatures{
 		Formatting:          mattermostFormatting,
 		MaxTextLength:       mattermostMaxPostRunes,
 		Delete:              event.CapLevelFullySupported,
@@ -61,6 +62,8 @@ func (c *MattermostClient) GetCapabilities(ctx context.Context, portal *bridgev2
 			event.CapMsgGIF:     &event.FileFeatures{MimeTypes: map[string]event.CapabilitySupportLevel{"image/*": event.CapLevelFullySupported, "video/*": event.CapLevelFullySupported}},
 		},
 	}
+	c.burnTimerFeatures(features)
+	return features
 }
 
 // outboundRootTarget prefers the explicit Matrix thread over the reply target.
@@ -134,13 +137,23 @@ func (c *MattermostClient) HandleMatrixMessage(ctx context.Context, msg *bridgev
 			body = "_" + body + "_"
 		}
 		zerolog.Ctx(ctx).Debug().Str("channel", channelID).Msg("Sending message to Mattermost")
-		dbMessage, err := c.sendPost(ctx, msg, mattermost.NewPost{ChannelID: channelID, Message: body})
+		np := mattermost.NewPost{ChannelID: channelID, Message: body}
+		if burnRequested(msg) {
+			if !c.burnSettings().Enabled {
+				return nil, wrapSendErr(errors.New("burn-on-read is not enabled on this Mattermost server"))
+			}
+			np.Type = mattermost.PostTypeBurnOnRead
+		}
+		dbMessage, err := c.sendPost(ctx, msg, np)
 		if err != nil {
 			return nil, wrapSendErr(err)
 		}
 		return &bridgev2.MatrixMessageResponse{DB: dbMessage}, nil
 
 	case event.MsgImage, event.MsgVideo, event.MsgAudio, event.MsgFile, event.CapMsgSticker:
+		if burnRequested(msg) {
+			return nil, wrapSendErr(errors.New("burn-on-read messages are text only"))
+		}
 		mxcURI := content.URL
 		var encFile *event.EncryptedFileInfo
 		if content.File != nil {
@@ -210,6 +223,9 @@ func (c *MattermostClient) HandleMatrixEdit(ctx context.Context, msg *bridgev2.M
 	if isCommandMessage(msg.EditTarget.ID) {
 		return wrapSendErr(errCommandMessage)
 	}
+	if post, err := mattermost.GetPost(c.serverURL(), c.Token, string(msg.EditTarget.ID)); err == nil && post.IsBurnOnRead() {
+		return wrapSendErr(errBurnEdit)
+	}
 	newBody := c.outboundMarkdown(ctx, src)
 	if handled, err := c.editQuotedReply(string(msg.EditTarget.ID), newBody); handled {
 		return wrapSendErr(err)
@@ -228,7 +244,7 @@ func (c *MattermostClient) HandleMatrixMessageRemove(ctx context.Context, msg *b
 	if isCommandMessage(msg.TargetMessage.ID) {
 		return nil // nothing in Mattermost; the Matrix copy is just removed
 	}
-	return mattermost.DeletePost(c.serverURL(), c.Token, string(msg.TargetMessage.ID))
+	return c.removePost(string(msg.TargetMessage.ID))
 }
 
 // PreHandleMatrixReaction validates and extracts the emoji name.
@@ -238,6 +254,9 @@ func (c *MattermostClient) PreHandleMatrixReaction(ctx context.Context, msg *bri
 	}
 	unicode := msg.Content.RelatesTo.Key
 	shortcode := unicodeToMMEmoji(unicode)
+	if isAckReaction(networkid.EmojiID(shortcode)) {
+		return bridgev2.MatrixReactionPreResponse{}, wrapSendErr(errReservedAckReaction)
+	}
 	return bridgev2.MatrixReactionPreResponse{
 		SenderID: networkid.UserID(c.UserID),
 		EmojiID:  networkid.EmojiID(shortcode),
@@ -247,11 +266,41 @@ func (c *MattermostClient) PreHandleMatrixReaction(ctx context.Context, msg *bri
 
 // HandleMatrixReaction adds a reaction on Mattermost.
 func (c *MattermostClient) HandleMatrixReaction(ctx context.Context, msg *bridgev2.MatrixReaction) (*database.Reaction, error) {
+	if msg != nil && msg.PreHandleResp != nil && isAckReaction(msg.PreHandleResp.EmojiID) {
+		return nil, wrapSendErr(errReservedAckReaction)
+	}
 	c.mu.RLock()
 	cl := c.client
 	c.mu.RUnlock()
 	if cl == nil {
 		return nil, fmt.Errorf("not connected to Mattermost")
+	}
+	if msg.TargetMessage != nil {
+		// Any reaction can be a request to open or to acknowledge; see reactionIntent.
+		postID := string(msg.TargetMessage.ID)
+		kind, post := c.classifyReaction(ctx, postID)
+		switch kind {
+		case reactionReveal:
+			rp, err := c.revealBurnOnRead(ctx, postID)
+			if err != nil {
+				return nil, wrapSendErr(err)
+			}
+			if err := c.applyReveal(ctx, msg.Portal, msg.TargetMessage, rp); err != nil {
+				return nil, wrapSendErr(err)
+			}
+			c.takeBackGesture(ctx, msg)
+			return gestureReaction(msg), nil
+		case reactionAcknowledge:
+			// A second reaction must not acknowledge again: that would restamp
+			// the time Mattermost holds the acknowledgement from.
+			if !post.AcknowledgedBy(c.UserID) {
+				if err := mattermost.AcknowledgePost(c.serverURL(), c.Token, c.UserID, postID); err != nil {
+					return nil, wrapSendErr(err)
+				}
+			}
+			c.takeBackGesture(ctx, msg)
+			return gestureReaction(msg), nil
+		}
 	}
 	shortcode := string(msg.PreHandleResp.EmojiID)
 	if err := mattermost.AddReaction(c.serverURL(), c.Token, c.UserID, string(msg.TargetMessage.ID), shortcode); err != nil {
@@ -265,6 +314,9 @@ func (c *MattermostClient) HandleMatrixReaction(ctx context.Context, msg *bridge
 
 // HandleMatrixReactionRemove removes a reaction on Mattermost.
 func (c *MattermostClient) HandleMatrixReactionRemove(ctx context.Context, msg *bridgev2.MatrixReactionRemove) error {
+	if msg != nil && msg.TargetReaction != nil && isAckReaction(msg.TargetReaction.EmojiID) {
+		return nil // BridgeV2 clears the local mapping, allowing the next sync to restore it.
+	}
 	c.mu.RLock()
 	cl := c.client
 	c.mu.RUnlock()
@@ -274,6 +326,15 @@ func (c *MattermostClient) HandleMatrixReactionRemove(ctx context.Context, msg *
 	shortcode := string(msg.TargetReaction.EmojiID)
 	if shortcode == "" {
 		shortcode = unicodeToMMEmoji(msg.TargetReaction.Emoji)
+	}
+	if isAckReaction(networkid.EmojiID(shortcode)) {
+		return nil
+	}
+	// A reaction that revealed or acknowledged left nothing behind in
+	// Mattermost, so removing it must not remove an emoji there. One Mattermost
+	// really holds (made in Mattermost itself) is still removed.
+	if kind, post := c.classifyReaction(ctx, string(msg.TargetReaction.MessageID)); kind != reactionOrdinary && !post.ReactedBy(c.UserID, shortcode) {
+		return nil
 	}
 	return mattermost.RemoveReaction(c.serverURL(), c.Token, c.UserID, string(msg.TargetReaction.MessageID), shortcode)
 }

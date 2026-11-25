@@ -18,7 +18,7 @@ Bridges text, media, reactions, edits, deletions, replies, emoji shortcodes, typ
 
 ### Download a release (easiest)
 
-Binaries are attached to each [release](https://github.com/FuturePresentLabs/mautrix-mattermost/releases) with a checksum, for these platforms:
+Binaries are attached to each [release](https://github.com/jameswagar/mautrix-mattermost/releases) with a checksum, for these platforms:
 
 | Platform | File |
 |---|---|
@@ -30,8 +30,8 @@ Binaries are attached to each [release](https://github.com/FuturePresentLabs/mau
 ```sh
 # pick the file for your platform
 file=mautrix-mattermost-linux-amd64.tar.gz
-curl -LO "https://github.com/FuturePresentLabs/mautrix-mattermost/releases/latest/download/$file"
-curl -LO "https://github.com/FuturePresentLabs/mautrix-mattermost/releases/latest/download/$file.sha256"
+curl -LO "https://github.com/jameswagar/mautrix-mattermost/releases/latest/download/$file"
+curl -LO "https://github.com/jameswagar/mautrix-mattermost/releases/latest/download/$file.sha256"
 
 # verify (either form works)
 shasum -a 256 -c "$file.sha256"      # macOS
@@ -50,7 +50,7 @@ xattr -d com.apple.quarantine ./mautrix-mattermost
 ### Build from source
 
 ```sh
-git clone https://github.com/FuturePresentLabs/mautrix-mattermost.git
+git clone https://github.com/jameswagar/mautrix-mattermost.git
 cd mautrix-mattermost
 ./build.sh          # produces ./mautrix-mattermost
 ```
@@ -245,6 +245,47 @@ a quote of it, and the bridge uses them (`network.quoted_replies`, on by default
 
 The bridge asks the server whether the plugin is active (every 10 minutes). Without it, or
 with the option off, a reply goes to the thread of the message replied to.
+
+## Reactions that act
+
+In a hurry nobody should be hunting for a particular emoji, so for two kinds of
+post **any reaction** is the gesture, and it is not sent to Mattermost as an emoji:
+
+- **Burn-on-read message from someone else.** It arrives as a placeholder that
+  says any reaction reveals it. The text then disappears when the countdown the
+  server reports ends. The countdown and the longest a message may exist both come
+  from the server's burn-on-read settings; the bridge holds no copy of either.
+- **Post that asks for an acknowledgement** (from someone else). Beeper has no
+  acknowledge button, so the message ends with a line saying so: "✅ Any reaction
+  acknowledges." Any reaction acknowledges it in Mattermost. A second reaction
+  does not acknowledge again.
+  The acknowledgement then appears on the message as a `✅ by <name>` reaction from
+  the bridge, like everyone else's.
+
+Revealing and acknowledging are separate acts. On a message that is both, the
+first reaction reveals it and a later reaction acknowledges it. The
+placeholder then says "After revealing it, react again to acknowledge."
+
+The line disappears once this bridged account acknowledges the post, whether you
+acknowledge from Beeper or in Mattermost, and comes back if that acknowledgement
+is withdrawn. Someone else acknowledging does not hide it. This applies to plain
+text, unrevealed burn placeholders, and text revealed through this bridge while
+both the viewer's expiry and the original Matrix removal deadline remain valid.
+The revealed-text edit uses the already-fetched server snapshot: it never
+reveals again, retains another plaintext copy, or restarts the countdown.
+Messages with attachments, quoted replies or link previews keep the line until
+the post itself is edited, since rebuilding those bodies could drop content.
+Messages bridged before prompt tracking existed are left unchanged.
+
+Once a reaction has revealed or acknowledged, the bridge redacts it, so it does
+not look as though that emoji was sent. If the reveal or acknowledgement fails
+the reaction stays, with the failure shown against it.
+
+Everything else, including your own posts and any post the bridge cannot read, is
+an ordinary emoji reaction. Removing one of these reactions does nothing in
+Mattermost, because nothing was added there. Withdrawing an acknowledgement is done
+in Mattermost, which also decides how long that stays possible; the bridge holds no
+time value for it.
 
 ## Read sync
 

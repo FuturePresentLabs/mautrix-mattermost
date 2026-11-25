@@ -190,12 +190,46 @@ func (c *Client) parseEvent(raw []byte) {
 		}
 		c.Events <- &EphemeralEvent{Post: post}
 
+	case "post_revealed":
+		post := decodePost(env.Data, "post")
+		if post == nil {
+			return
+		}
+		evt := &PostRevealedEvent{PostID: post.ID, ChannelID: post.ChannelID, AuthorID: post.UserID}
+		if post.Metadata != nil {
+			evt.ExpireAt = post.Metadata.ExpireAt
+		}
+		c.Events <- evt // the post itself is not passed on
+
+	case "post_burned":
+		id := strFromData(env.Data, "post_id")
+		if id == "" {
+			return
+		}
+		c.Events <- &PostBurnedEvent{PostID: id, ChannelID: env.Broadcast.ChannelID}
+
+	case "burn_on_read_all_revealed":
+		id := strFromData(env.Data, "post_id")
+		if id == "" {
+			return
+		}
+		var expire int64
+		if v, ok := env.Data["sender_expire_at"].(float64); ok {
+			expire = int64(v)
+		}
+		c.Events <- &PostAllRevealedEvent{PostID: id, ChannelID: env.Broadcast.ChannelID, SenderExpireAt: expire}
+
 	case "post_deleted":
 		post := decodePost(env.Data, "post")
 		if post == nil {
 			return
 		}
 		c.Events <- &PostDeletedEvent{Post: post, ChannelID: post.ChannelID}
+
+	case "post_acknowledgement_added", "post_acknowledgement_removed":
+		if ack := decodeAcknowledgement(env); ack != nil {
+			c.Events <- &AcknowledgementEvent{Acknowledgement: *ack, IsAdd: env.Event == "post_acknowledgement_added"}
+		}
 
 	case "reaction_added":
 		r := decodeReaction(env.Data, "reaction")
