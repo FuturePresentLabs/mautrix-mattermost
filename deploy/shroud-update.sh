@@ -11,7 +11,7 @@
 #
 # Environment:
 #   MM_IMAGE   Docker Hub repository   (default futurepresentlabs/mautrix-mattermost)
-#   MM_TAG     Tag to follow           (default latest; use edge for fpl-main)
+#   MM_TAG     Tag to follow           (default latest; use edge for jw-main)
 #   MM_VM      Shroud VM name          (default mautrix-mattermost)
 #   MM_STATE   State directory         (default /var/lib/mautrix-mattermost-updater)
 #   SHROUD_RUNTIME_DIR                 (default /var/lib/shroud)

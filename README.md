@@ -3,7 +3,7 @@
 
 A Matrix–[Mattermost](https://mattermost.com) bridge built on the [mautrix bridgev2](https://github.com/mautrix/go) framework.
 
-> **This is the Future Present Labs fork** of [bostrot/mautrix-mattermost](https://github.com/bostrot/mautrix-mattermost). It adds native threading, a proper channel archive/restore/delete lifecycle, and reaction backfill, and ships ready-to-run releases. See [About this fork](#about-this-fork).
+> **This is a fork** of [bostrot/mautrix-mattermost](https://github.com/bostrot/mautrix-mattermost), with additional bridge features and ready-to-run releases. See [About this fork](#about-this-fork).
 
 Bridges text, media, reactions, edits, deletions, replies, emoji shortcodes, typing notifications, and backfill. Supports Personal Access Token (PAT) and email+password login. All teams, channels, and DMs are bridged automatically on login.
 
@@ -357,20 +357,29 @@ never reach the bridge.
 
 ## About this fork
 
-This fork tracks upstream and carries the changes below. They are also open as upstream pull requests, so some or all of them may eventually be merged there.
+This fork tracks upstream, ships its own releases, and contributes changes back
+where practical. Several features below have already merged upstream; the
+remaining lifecycle follow-ups are separate PRs.
 
-| Change | Upstream PR |
+| Change | Upstream status |
 |---|---|
-| Native Matrix threading for Mattermost threads | [#8](https://github.com/bostrot/mautrix-mattermost/pull/8) |
-| Channel lifecycle: an archived channel keeps its room, shows Mattermost's own archive/restore message and becomes read-only; a permanently deleted channel removes its room, including one deleted while the bridge was offline | [#9](https://github.com/bostrot/mautrix-mattermost/pull/9) |
-| Reactions are backfilled with the messages they belong to | [#10](https://github.com/bostrot/mautrix-mattermost/pull/10) (merged) |
-| Linked Mattermost posts are quoted under their permalinks | [#11](https://github.com/bostrot/mautrix-mattermost/pull/11) |
-| @mentions in both directions, full room member lists, current ghost names, configurable display names | not yet opened |
-| Status on DM titles (`network.dm_status`) | fork-only for now |
-| Read sync, one space per team | fork-only for now |
+| Native Matrix threading for Mattermost threads | [#8](https://github.com/bostrot/mautrix-mattermost/pull/8) — merged |
+| Authenticated channel-deletion probe and channel restoration handling | [#9](https://github.com/bostrot/mautrix-mattermost/pull/9) — open, awaiting re-review |
+| Reactions backfilled with their messages | [#10](https://github.com/bostrot/mautrix-mattermost/pull/10) — merged |
+| Linked Mattermost posts quoted under their permalinks | [#11](https://github.com/bostrot/mautrix-mattermost/pull/11) — merged |
+| Transient websocket-disconnect status | [#12](https://github.com/bostrot/mautrix-mattermost/pull/12) — merged |
+| File names kept separate from captions | [#13](https://github.com/bostrot/mautrix-mattermost/pull/13) — merged |
+| Mentions in both directions, full member lists and display-name options | [#14](https://github.com/bostrot/mautrix-mattermost/pull/14) — merged |
+| Two-way read-state sync | [#15](https://github.com/bostrot/mautrix-mattermost/pull/15) — merged |
+| Integration-message attachments | [#16](https://github.com/bostrot/mautrix-mattermost/pull/16) — merged |
+| One Matrix space per Mattermost team | [#17](https://github.com/bostrot/mautrix-mattermost/pull/17) — merged |
+| Read-only archived rooms with reversible power levels | [#21](https://github.com/bostrot/mautrix-mattermost/pull/21) — draft; rebase after #9 merges |
+| Opt-in lifecycle polling with a configurable interval | [#22](https://github.com/bostrot/mautrix-mattermost/pull/22) — draft; rebase after #9 merges |
+| DM-title status, optional presence publishing, burn-on-read and acknowledgement workflows | Fork-only; no upstream PRs yet |
 
-Optional presence publishing (see [Presence](#presence-optional)) is fork-only and has
-no upstream PR yet.
+The fork's existing lifecycle implementation is broader than the small core fix
+in #9. The separate drafts do not change what is already available in fork
+releases.
 
 How the lifecycle behaves, and what to watch for:
 
@@ -380,9 +389,9 @@ How the lifecycle behaves, and what to watch for:
 - The deferred delete check requires `async_events: false` in the bridge config. `bbctl` generates it that way; if you set it to `true` the bridge keeps rooms instead of deleting them.
 - The bridge polls the channel list about every 30 seconds to catch events the Mattermost websocket missed.
 
-Releases are tagged with plain semver, starting at `v0.1.0`, and the version the binary reports matches the tag. The `main` branch mirrors upstream; this branch (`fpl-main`) is the one to use.
-
-A fork release does not need to match an upstream version number. Pass `-fpl` as build metadata or a suffix only if you later want to distinguish a fork build from an upstream one.
+Releases use plain semantic version tags, and the binary's reported version
+matches the tag. Use the default `jw-main` branch for this fork. Fork release
+numbers are independent of upstream's version numbers.
 
 ## Development
 

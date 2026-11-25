@@ -9,17 +9,17 @@ name: docker
 #   DOCKERHUB_TOKEN     Docker Hub access token with Read & Write
 #
 # Tags:
-#   fpl-main branch -> edge
+#   jw-main branch -> edge
 #   v* tags         -> latest, X.Y.Z, X.Y
 #   pull requests   -> pr-<number> (not pushed)
 #   every build     -> sha-<short>
 
 on:
   push:
-    branches: [fpl-main]
+    branches: [jw-main]
     tags: ["v*"]
   pull_request:
-    branches: [fpl-main]
+    branches: [jw-main]
   workflow_dispatch:
 
 permissions:
@@ -64,7 +64,7 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
-            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/fpl-main' }}
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/jw-main' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
