@@ -445,7 +445,7 @@ func (c *MattermostClient) processEvents() {
 				TargetMessage: networkid.MessageID(evt.Post.ID),
 				Data:          evt.Post,
 				ConvertEditFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *mattermost.Post) (*bridgev2.ConvertedEdit, error) {
-					return c.convertPostEdit(ctx, existing, data)
+					return c.convertPostEdit(ctx, intent, portal.MXID, existing, data)
 				},
 			})
 

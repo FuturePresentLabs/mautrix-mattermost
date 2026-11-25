@@ -176,14 +176,14 @@ func TestBackfillOfBurnOnReadNeverRendersOtherPeoplesText(t *testing.T) {
 
 func TestPostEditOfBurnOnReadIsRefused(t *testing.T) {
 	c := &MattermostClient{UserID: meID}
-	edit, err := c.convertPostEdit(context.Background(), []*database.Message{{ID: "p1"}}, burnPost(meID, secretText, true))
+	edit, err := c.convertPostEdit(context.Background(), nil, "", []*database.Message{{ID: "p1"}}, burnPost(meID, secretText, true))
 	if !errors.Is(err, bridgev2.ErrIgnoringRemoteEvent) || edit != nil {
 		t.Fatalf("a burn-on-read update must be ignored, got %+v, %v", edit, err)
 	}
 	if strings.Contains(err.Error(), "SECRET") {
 		t.Error("the refusal must not carry content")
 	}
-	ok, err := c.convertPostEdit(context.Background(), []*database.Message{{ID: "p3"}}, &mattermost.Post{ID: "p3", Message: "fixed"})
+	ok, err := c.convertPostEdit(context.Background(), nil, "", []*database.Message{{ID: "p3"}}, &mattermost.Post{ID: "p3", Message: "fixed"})
 	if err != nil || len(ok.ModifiedParts) != 1 {
 		t.Fatalf("ordinary edits must still work: %+v, %v", ok, err)
 	}

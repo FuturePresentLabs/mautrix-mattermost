@@ -178,31 +178,90 @@ func humanDuration(d time.Duration) string {
 	}
 }
 
+// existingHasMedia reports whether any stored part is known to carry media.
+// MediaFileID is the exact signal; a stable attachment part ID and the legacy
+// unsafe flag are conservative fallbacks for rows written before it existed.
+func existingHasMedia(existing []*database.Message) bool {
+	for _, row := range existing {
+		if strings.HasPrefix(string(row.PartID), "att_") {
+			return true
+		}
+		if old, ok := row.Metadata.(*MessageMetadata); ok && old != nil && (old.MediaFileID != "" || old.AckPromptUnsafe) {
+			return true
+		}
+	}
+	return false
+}
+
 // convertPostEdit converts an edited post. Burn-on-read posts are not
 // editable on the server, so an edit event for one is refused rather than
 // carried: it would otherwise pass the text through unguarded.
-func (c *MattermostClient) convertPostEdit(ctx context.Context, existing []*database.Message, post *mattermost.Post) (*bridgev2.ConvertedEdit, error) {
-	if post.IsBurnOnRead() {
+//
+// An edit that carries attachments is rebuilt from those attachments and
+// mapped onto the rows already stored, so media keeps its Matrix event. A
+// metadata-only or empty update edits nothing: writing an empty text body
+// would replace an image post with a blank message.
+func (c *MattermostClient) convertPostEdit(ctx context.Context, intent bridgev2.MatrixAPI, roomID id.RoomID, existing []*database.Message, post *mattermost.Post) (*bridgev2.ConvertedEdit, error) {
+	if post == nil || post.IsBurnOnRead() || post.IsSystem() {
 		return nil, bridgev2.ErrIgnoringRemoteEvent
 	}
-	var parts []*bridgev2.ConvertedEditPart
-	hidden := c.ackPromptFor(post) == ""
-	for _, dbMsg := range existing {
-		unsafe, revealedBurn := false, false
-		if old, ok := dbMsg.Metadata.(*MessageMetadata); ok && old != nil {
-			unsafe = old.AckPromptUnsafe
-			revealedBurn = old.AckPromptRevealedBurn
-		}
-		dbMsg.Metadata = &MessageMetadata{AckPromptHidden: hidden, AckPromptTracked: true, AckPromptUnsafe: unsafe,
-			AckPromptRevealedBurn: revealedBurn}
-		parts = append(parts, &bridgev2.ConvertedEditPart{
-			Part:    dbMsg,
-			Type:    event.EventMessage,
-			Content: c.editContent(ctx, post),
-		})
-		break // only edit the first/text part
+	if len(existing) == 0 {
+		return nil, bridgev2.ErrIgnoringRemoteEvent
 	}
-	return &bridgev2.ConvertedEdit{ModifiedParts: parts}, nil
+	files := resolveFiles(post)
+	if len(files) > 0 {
+		if intent == nil {
+			return nil, errEditMediaUnavailable
+		}
+		parts, err := c.convertPostMediaEditParts(ctx, intent, roomID, post)
+		if err != nil {
+			return nil, err
+		}
+		return c.mapEditParts(post, existing, parts), nil
+	}
+	// A snapshot without file_ids may be partial. If any stored row is known
+	// media (or is a legacy unsafe row that could be), its text cannot be
+	// trusted to describe the surviving attachments: fail closed. An explicit
+	// empty list is the server saying the attachments were removed.
+	if post.FileIDs == nil && existingHasMedia(existing) {
+		return nil, bridgev2.ErrIgnoringRemoteEvent
+	}
+
+	content := c.editContent(ctx, post)
+	if content == nil || (strings.TrimSpace(content.Body) == "" && content.URL == "" && content.File == nil) {
+		// Nothing but metadata changed (or the post now has no visible
+		// content). Leave the stored parts untouched.
+		return nil, bridgev2.ErrIgnoringRemoteEvent
+	}
+	primary := existing[0]
+	for _, dbMsg := range existing {
+		if dbMsg.PartID == "" {
+			primary = dbMsg
+			break
+		}
+	}
+	unsafe, revealedBurn := false, false
+	if old, ok := primary.Metadata.(*MessageMetadata); ok && old != nil {
+		unsafe = old.AckPromptUnsafe
+		revealedBurn = old.AckPromptRevealedBurn
+	}
+	primary.Metadata = &MessageMetadata{AckPromptHidden: c.ackPromptFor(post) == "", AckPromptTracked: true,
+		AckPromptUnsafe: unsafe, AckPromptRevealedBurn: revealedBurn}
+	edit := &bridgev2.ConvertedEdit{ModifiedParts: []*bridgev2.ConvertedEditPart{{
+		Part:    primary,
+		Type:    event.EventMessage,
+		Content: content,
+	}}}
+	// An explicitly empty file list means the remaining attachments were
+	// removed. A missing list is a partial snapshot and deletes nothing.
+	if post.FileIDs != nil && len(post.FileIDs) == 0 {
+		for _, dbMsg := range existing {
+			if dbMsg != primary && strings.HasPrefix(string(dbMsg.PartID), "att_") {
+				edit.DeletedParts = append(edit.DeletedParts, dbMsg)
+			}
+		}
+	}
+	return edit, nil
 }
 
 // --- Beeper -> Mattermost -------------------------------------------------

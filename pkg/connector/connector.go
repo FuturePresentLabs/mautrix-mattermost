@@ -83,6 +83,11 @@ type MessageMetadata struct {
 	// burn-on-read post. The reveal path alone sets it, so media, quotes and
 	// previews can never fall through that guard.
 	AckPromptRevealedBurn bool `json:"ack_prompt_revealed_burn,omitempty"`
+	// MediaFileID identifies the Mattermost file this row was converted from.
+	// It is identity only: no filename, caption, or other content is stored.
+	// An empty value means the row is not known to be media, except for legacy
+	// rows that predate this field and are flagged unsafe instead.
+	MediaFileID string `json:"media_file_id,omitempty"`
 }
 
 // CopyFrom merges metadata from an edit part into the row being edited.
@@ -92,6 +97,7 @@ func (m *MessageMetadata) CopyFrom(other any) {
 		m.AckPromptTracked = o.AckPromptTracked
 		m.AckPromptUnsafe = o.AckPromptUnsafe
 		m.AckPromptRevealedBurn = o.AckPromptRevealedBurn
+		m.MediaFileID = o.MediaFileID
 	}
 }
 

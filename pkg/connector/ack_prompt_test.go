@@ -80,7 +80,7 @@ func TestAPostWithNoTextStillGetsThePrompt(t *testing.T) {
 func TestThePromptFollowsTheAcknowledgementThroughEdits(t *testing.T) {
 	c := &MattermostClient{UserID: meID}
 	edit := func(post *mattermost.Post) string {
-		ce, err := c.convertPostEdit(context.Background(), []*database.Message{{ID: "p1"}}, post)
+		ce, err := c.convertPostEdit(context.Background(), nil, "", []*database.Message{{ID: "p1"}}, post)
 		if err != nil || len(ce.ModifiedParts) != 1 {
 			t.Fatalf("convertPostEdit = %+v, %v", ce, err)
 		}
@@ -198,7 +198,7 @@ func TestAckPromptStateIsRecordedByConversion(t *testing.T) {
 	}
 
 	// An edit merges the state into the row it edits rather than dropping it.
-	edit, err := c.convertPostEdit(context.Background(), []*database.Message{{ID: "p1", Metadata: &MessageMetadata{}}}, acked)
+	edit, err := c.convertPostEdit(context.Background(), nil, "", []*database.Message{{ID: "p1", Metadata: &MessageMetadata{}}}, acked)
 	if err != nil || len(edit.ModifiedParts) != 1 {
 		t.Fatalf("convertPostEdit = %+v, %v", edit, err)
 	}
