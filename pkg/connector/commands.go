@@ -174,7 +174,7 @@ const ephemeralNoticeLifetime = 24 * time.Hour
 // relayEphemeral shows a post only this user sees (a command's reply) as a
 // notice from the bridge, in the post's thread when it has one.
 func (c *MattermostClient) relayEphemeral(post *mattermost.Post) {
-	if post == nil || post.ChannelID == "" {
+	if post == nil || post.ChannelID == "" || post.IsBurnOnRead() {
 		return
 	}
 	md := strings.TrimSpace(postMarkdown(post))

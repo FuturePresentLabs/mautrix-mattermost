@@ -52,6 +52,11 @@ func threadRelation(post *mattermost.Post) (replyTo *networkid.MessageOptionalPa
 // convertPost converts a Mattermost post (text + file attachments) into Matrix message parts.
 // intent is used to upload media to the homeserver; it may be nil (e.g. in unit tests without attachments).
 func (c *MattermostClient) convertPost(ctx context.Context, intent bridgev2.MatrixAPI, roomID id.RoomID, post *mattermost.Post) (*bridgev2.ConvertedMessage, error) {
+	// Before anything reads the post: a burn-on-read post never goes through the
+	// ordinary path (see burn.go).
+	if post.IsBurnOnRead() {
+		return c.convertBurnOnRead(ctx, post), nil
+	}
 	var parts []*bridgev2.ConvertedMessagePart
 	replyTo, threadRoot := threadRelation(post)
 
@@ -132,7 +137,8 @@ func (c *MattermostClient) convertPost(ctx context.Context, intent bridgev2.Matr
 	}
 
 	// Convert text body: the message plus any integration attachments.
-	if text := postMarkdown(post); text != "" {
+	quoted := postMarkdown(post)
+	if text := withAckPrompt(quoted, c.ackPrompt(post, false)); text != "" {
 		if len(parts) > 0 {
 			// Embed caption into the first attachment (Matrix caption convention / MSC2530).
 			firstContent := parts[0].Content
@@ -145,21 +151,22 @@ func (c *MattermostClient) convertPost(ctx context.Context, intent bridgev2.Matr
 				firstContent.FormattedBody = rendered.FormattedBody
 				firstContent.Format = rendered.Format
 			}
-			c.attachPermalinkQuotes(ctx, firstContent, text)
+			c.attachPermalinkQuotes(ctx, firstContent, quoted)
 		} else {
 			// Text-only message.
 			textContent := c.renderPostText(ctx, text)
 			textContent.BeeperLinkPreviews = c.linkPreviews(ctx, intent, roomID, post)
 			// Quote linked Mattermost posts under the link. Best effort: the
 			// message is sent either way.
-			c.attachPermalinkQuotes(ctx, &textContent, text)
+			c.attachPermalinkQuotes(ctx, &textContent, quoted)
 			cm := &bridgev2.ConvertedMessage{
 				ReplyTo:    replyTo,
 				ThreadRoot: threadRoot,
 				Parts: []*bridgev2.ConvertedMessagePart{{
-					ID:      networkid.PartID(""),
-					Type:    event.EventMessage,
-					Content: &textContent,
+					ID:         networkid.PartID(""),
+					Type:       event.EventMessage,
+					Content:    &textContent,
+					DBMetadata: ackPromptMetadata(c, post, &textContent),
 				}},
 			}
 			return cm, nil
@@ -177,6 +184,7 @@ func (c *MattermostClient) convertPost(ctx context.Context, intent bridgev2.Matr
 			},
 		}}
 	}
+	parts[0].DBMetadata = ackPromptMetadata(c, post, parts[0].Content)
 
 	return &bridgev2.ConvertedMessage{
 		ReplyTo:    replyTo,

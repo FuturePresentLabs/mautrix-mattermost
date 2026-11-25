@@ -84,12 +84,26 @@ func (p *Post) Timestamp() time.Time {
 
 // PostMetadata holds optional rich metadata on a post.
 type PostMetadata struct {
-	Files     []*FileInfo `json:"files,omitempty"`
-	Reactions []*Reaction `json:"reactions,omitempty"`
+	// ExpireAt is when this user's copy of a burn-on-read post expires (ms).
+	// Set only once the user has revealed it.
+	ExpireAt int64 `json:"expire_at,omitempty"`
+	// Priority is set on top-level posts only, and only when the server has
+	// Message Priority enabled.
+	Priority         *PostPriority      `json:"priority,omitempty"`
+	Acknowledgements []*Acknowledgement `json:"acknowledgements,omitempty"`
+	Files            []*FileInfo        `json:"files,omitempty"`
+	Reactions        []*Reaction        `json:"reactions,omitempty"`
 	// Embeds are the server's link previews (type "opengraph").
 	Embeds []*PostEmbed `json:"embeds,omitempty"`
 	// Images holds the size of images the post refers to, keyed by URL.
 	Images map[string]*PostImage `json:"images,omitempty"`
+}
+
+// PostPriority is the priority an author gave a post.
+type PostPriority struct {
+	Priority *string `json:"priority,omitempty"`
+	// RequestedAck is set when the author asked recipients to acknowledge the post.
+	RequestedAck *bool `json:"requested_ack,omitempty"`
 }
 
 // PostEmbed is something the server unfurled for a post.

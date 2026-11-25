@@ -33,6 +33,24 @@ type MattermostClient struct {
 	// baseURL may be overridden in tests to point at a mock server.
 	baseURL string
 
+	// burn is the server's burn-on-read settings (burn.go); nil until read.
+	burn atomic.Pointer[mattermost.BurnOnReadSettings]
+	// scheduleDisappearFn overrides scheduleDisappear in tests.
+	scheduleDisappearFn func(ctx context.Context, channelID, postID string, at time.Time) error
+	// addDisappearFn overrides adding to the bridge's disappearing-message loop in tests.
+	addDisappearFn func(ctx context.Context, roomID id.RoomID, eventID id.EventID, at time.Time) error
+
+	// redactReactionFn overrides how a reaction that acted as a gesture is
+	// redacted, in tests.
+	redactReactionFn func(ctx context.Context, roomID id.RoomID, eventID id.EventID) error
+
+	// Removal-time reconciliation (burn.go). The hooks replace the bridge
+	// database in tests.
+	burnMu         sync.Mutex
+	burnPending    map[string]time.Time // post ID -> when its bridged copy must disappear
+	burnLookupFn   func(ctx context.Context, postID string) (id.RoomID, id.EventID, bool, error)
+	hasDisappearFn func(ctx context.Context, eventID id.EventID) (bool, error)
+
 	client   *mattermost.Client
 	mu       sync.RWMutex
 	channels map[string]*mattermost.Channel // keyed by channel ID
@@ -283,6 +301,7 @@ func (c *MattermostClient) Connect(ctx context.Context) {
 	c.resolveNameFormat(c.lifecycleLogger())
 	c.done = make(chan struct{})
 	c.startPresencePoller(c.done)
+	go c.runBurnReconcileLoop(c.done, burnReconcileEvery)
 	go c.connectLoop()
 	go c.lifecyclePollLoop()
 }
@@ -341,7 +360,12 @@ func (c *MattermostClient) processEvents() {
 			c.UserLogin.BridgeState.Send(status.BridgeState{
 				StateEvent: status.StateConnected,
 			})
-			go c.syncChannels()
+			go func() {
+				c.refreshBurnSettings() // before the sync so room capabilities carry the timer
+				c.syncChannels()
+				c.reconcileAcknowledgements()
+				c.runBurnSettingsLoop(c.done, burnSettingsRefresh) // blocks until disconnect, so it goes last
+			}()
 
 		case *mattermost.PostedEvent:
 			if evt.Post == nil || !c.ownsPost(evt) {
@@ -390,7 +414,10 @@ func (c *MattermostClient) processEvents() {
 			})
 
 		case *mattermost.PostEditedEvent:
-			if evt.Post == nil {
+			// Mattermost emits post_edited for acknowledgement metadata too.
+			// Burn-on-read text cannot be edited, so never forward this payload
+			// or turn its metadata update into a misleading error notice.
+			if evt.Post == nil || evt.Post.IsBurnOnRead() {
 				continue
 			}
 			isFromMe := evt.Post.UserID == c.UserID
@@ -408,21 +435,17 @@ func (c *MattermostClient) processEvents() {
 					Timestamp:  evt.Post.Timestamp(),
 					Sender:     editSender,
 					LogContext: func(z zerolog.Context) zerolog.Context { return z },
+					PostHandleFunc: func(ctx context.Context, portal *bridgev2.Portal) {
+						// The native edit payload enriches acknowledgement metadata for roots.
+						if evt.Post.RootID == "" || evt.Post.Metadata != nil && evt.Post.Metadata.Acknowledgements != nil {
+							c.reconcileAckPost(ctx, portal, evt.ChannelID, evt.Post)
+						}
+					},
 				},
 				TargetMessage: networkid.MessageID(evt.Post.ID),
 				Data:          evt.Post,
 				ConvertEditFunc: func(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, data *mattermost.Post) (*bridgev2.ConvertedEdit, error) {
-					var parts []*bridgev2.ConvertedEditPart
-					for _, dbMsg := range existing {
-						content := c.editContent(ctx, data)
-						parts = append(parts, &bridgev2.ConvertedEditPart{
-							Part:    dbMsg,
-							Type:    event.EventMessage,
-							Content: content,
-						})
-						break // only edit the first/text part
-					}
-					return &bridgev2.ConvertedEdit{ModifiedParts: parts}, nil
+					return c.convertPostEdit(ctx, existing, data)
 				},
 			})
 
@@ -440,7 +463,13 @@ func (c *MattermostClient) processEvents() {
 				TargetMessage: networkid.MessageID(evt.Post.ID),
 			})
 
+		case *mattermost.AcknowledgementEvent:
+			c.handleAcknowledgement(evt)
+
 		case *mattermost.ReactionEvent:
+			if isAckReaction(networkid.EmojiID(evt.Reaction.EmojiName)) {
+				continue
+			}
 			evtType := bridgev2.RemoteEventReaction
 			if !evt.IsAdd {
 				evtType = bridgev2.RemoteEventReactionRemove
@@ -449,7 +478,7 @@ func (c *MattermostClient) processEvents() {
 				EventMeta: simplevent.EventMeta{
 					Type:       evtType,
 					PortalKey:  networkid.PortalKey{ID: networkid.PortalID(evt.ChannelID), Receiver: c.UserLogin.ID},
-					Sender:     bridgev2.EventSender{Sender: networkid.UserID(evt.Reaction.UserID)},
+					Sender:     c.userSender(evt.Reaction.UserID),
 					LogContext: func(z zerolog.Context) zerolog.Context { return z },
 				},
 				TargetMessage: networkid.MessageID(evt.Reaction.PostID),
@@ -586,6 +615,9 @@ func (c *MattermostClient) processEvents() {
 
 		case *mattermost.EphemeralEvent:
 			c.relayEphemeral(evt.Post)
+
+		case *mattermost.PostBurnedEvent, *mattermost.PostRevealedEvent, *mattermost.PostAllRevealedEvent:
+			c.handleBurnLifecycle(context.Background(), evt)
 
 		case *mattermost.AuthErrorEvent:
 			c.UserLogin.BridgeState.Send(status.BridgeState{
@@ -822,7 +854,7 @@ func (c *MattermostClient) queueNoticeWithExpiry(channelID networkid.PortalID, r
 // again, so an edit does not drop the quote the original message carried.
 func (c *MattermostClient) editContent(ctx context.Context, post *mattermost.Post) *event.MessageEventContent {
 	text := postMarkdown(post)
-	rendered := c.renderPostText(ctx, text)
+	rendered := c.renderPostText(ctx, withAckPrompt(text, c.ackPromptFor(post)))
 	content := &rendered
 	c.attachPermalinkQuotes(ctx, content, text)
 	return content
