@@ -258,7 +258,7 @@ pushes them to Docker Hub (`futurepresentlabs/mautrix-mattermost`):
 
 | Trigger | Tags |
 | --- | --- |
-| push to `fpl-main` | `edge`, `sha-<short>` |
+| push to `jw-main` | `edge`, `sha-<short>` |
 | tag `v*` | `latest`, `X.Y.Z`, `X.Y`, `sha-<short>` |
 | pull request | build only |
 
@@ -283,7 +283,7 @@ systemctl enable --now mautrix-mattermost-update.timer
 ```
 
 It follows `latest` by default. Set `MM_TAG=edge` in the unit environment to
-track every `fpl-main` build, or override `MM_IMAGE` for a different registry or
+track every `jw-main` build, or override `MM_IMAGE` for a different registry or
 namespace. An authenticated Docker Hub pull (`skopeo login docker.io`) avoids
 anonymous rate limits.
 
