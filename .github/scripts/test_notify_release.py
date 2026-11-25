@@ -24,7 +24,7 @@ class NotifyTests(unittest.TestCase):
         notify.main()
         request = send.call_args.args[0]
         self.assertEqual(request.get_method(), 'POST')
-        self.assertEqual(notify.json.loads(request.data), {'text': 'Mautrix-Mattermost v1.2.3 released: https://github.com/owner/repo/releases/tag/v1.2.3', 'username': 'Mautrix Release Bot'})
+        self.assertEqual(notify.json.loads(request.data), {'text': 'Mautrix-Mattermost v1.2.3 released: https://github.com/owner/repo/releases/tag/v1.2.3', 'username': 'Release Bot'})
 
     @patch.dict(os.environ, {**ENV, 'GITHUB_REF_NAME': 'main'}, clear=True)
     @patch.object(notify.urllib.request, 'urlopen')
