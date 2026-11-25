@@ -1,0 +1,57 @@
+name: recover-v0.1.13-macos
+
+# One-off CI recovery for an immutable release whose ARM runner was unavailable.
+# This branch's workflow checks out the release source, not the workflow commit.
+on:
+  push:
+    branches: [release/v0.1.13-macos-recovery]
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 48349d43c2cb7f13dacc9dc2ee2d113b978462cc
+          fetch-depth: 0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: Verify immutable release source
+        run: |
+          test "$(git rev-parse HEAD)" = 48349d43c2cb7f13dacc9dc2ee2d113b978462cc
+          test "$(git describe --exact-match --tags)" = v0.1.13
+      - name: Vet and race tests on native Intel runner
+        run: |
+          go vet -tags goolm ./...
+          go test -race -tags goolm ./... -count=1
+      - name: Build and checksum both macOS architectures
+        run: |
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            GOOS=darwin GOARCH="$arch" ./build.sh
+            file mautrix-mattermost
+            if [ "$arch" = amd64 ]; then
+              version=$(./mautrix-mattermost --version)
+              printf '%s\n' "$version"
+              case "$version" in
+                "mautrix-mattermost v0.1.13 ("*) ;;
+                *) exit 1 ;;
+              esac
+            fi
+            archive="mautrix-mattermost-darwin-$arch.tar.gz"
+            tar czf "dist/$archive" mautrix-mattermost
+            (cd dist && shasum -a 256 "$archive" > "$archive.sha256")
+            rm mautrix-mattermost
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-v0.1.13-recovery
+          path: dist/*
+          if-no-files-found: error
