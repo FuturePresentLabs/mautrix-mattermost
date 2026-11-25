@@ -54,6 +54,7 @@ jobs:
         run: |
           go vet -tags goolm ./...
           go test -race -tags goolm ./...
+          python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 
       # build.sh stamps the binary with `git describe --exact-match --tags`. A
       # checkout of a tag can arrive without the tag ref, which leaves the version
@@ -120,3 +121,10 @@ jobs:
               --title "$GITHUB_REF_NAME" \
               --generate-notes
           fi
+
+      # A failed notification fails this job visibly; it does not undo the release.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Notify Mattermost of published release
+        env:
+          MATTERMOST_RELEASE_WEBHOOK: ${{ secrets.MATTERMOST_RELEASE_WEBHOOK }}
+        run: python3 .github/scripts/notify-release.py
