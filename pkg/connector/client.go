@@ -43,6 +43,9 @@ type MattermostClient struct {
 	// redactReactionFn overrides how a reaction that acted as a gesture is
 	// redacted, in tests.
 	redactReactionFn func(ctx context.Context, roomID id.RoomID, eventID id.EventID) error
+	// redactCommandFn overrides how a command's invocation is redacted after
+	// Mattermost ran it, in tests.
+	redactCommandFn func(ctx context.Context, roomID id.RoomID, eventID id.EventID) error
 
 	// Removal-time reconciliation (burn.go). The hooks replace the bridge
 	// database in tests.
