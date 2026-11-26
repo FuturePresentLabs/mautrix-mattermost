@@ -2,6 +2,7 @@ package mattermost
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -70,7 +72,14 @@ func (e *HTTPError) IsAuthoritativeChannelNotFound(channelID string) bool {
 // status let callers classify failures without parsing text.
 func newHTTPError(resp *http.Response, path string) *HTTPError {
 	body, _ := io.ReadAll(resp.Body)
-	httpErr := &HTTPError{StatusCode: resp.StatusCode, Path: path, Body: string(body)}
+	return newHTTPErrorFromBody(resp.StatusCode, path, body)
+}
+
+// newHTTPErrorFromBody builds the error from a body that has already been read,
+// so a caller that must inspect the response before deciding can still report
+// the same structured error as every other request.
+func newHTTPErrorFromBody(status int, path string, body []byte) *HTTPError {
+	httpErr := &HTTPError{StatusCode: status, Path: path, Body: string(body)}
 	var payload struct {
 		ID         string `json:"id"`
 		Message    string `json:"message"`
@@ -262,6 +271,61 @@ func GetChannel(serverURL, token, channelID string) (*Channel, error) {
 	return &ch, nil
 }
 
+// GetChannelContext fetches one channel, honouring cancellation and refusing
+// redirects: an answer about a channel's lifecycle must come from the exact
+// authenticated endpoint, never from wherever a redirect points.
+func GetChannelContext(ctx context.Context, serverURL, token, channelID string) (*Channel, error) {
+	var ch Channel
+	if err := doGetWithRedirectPolicy(ctx, serverURL, token, "/api/v4/channels/"+channelID, &ch, true); err != nil {
+		return nil, err
+	}
+	return &ch, nil
+}
+
+// GetSelfContext returns the token's own user, refusing redirects so the
+// identity a lifecycle check compares against cannot be answered by a proxy.
+func GetSelfContext(ctx context.Context, serverURL, token string) (id, username string, err error) {
+	var u User
+	if err = doGetWithRedirectPolicy(ctx, serverURL, token, "/api/v4/users/me", &u, true); err != nil {
+		return
+	}
+	return u.ID, u.Username, nil
+}
+
+// GetAllChannelsIncludingArchived lists every channel the user belongs to,
+// archived ones included. Mattermost's ordinary listing omits archived
+// channels, so a room whose channel was archived while the bridge was offline
+// would otherwise never learn that its channel still exists.
+//
+// The listing is validated rather than trusted: a missing or negative
+// delete_at, a blank ID or a duplicate entry makes it unusable, because each of
+// those would let an unverified answer decide a channel's state.
+func GetAllChannelsIncludingArchived(ctx context.Context, serverURL, token, userID string) (map[string]*Channel, error) {
+	if userID == "" {
+		return nil, errors.New("cannot list channels without a Mattermost user ID")
+	}
+	var listing []struct {
+		Channel
+		DeleteAt *int64 `json:"delete_at"`
+	}
+	path := "/api/v4/users/" + url.PathEscape(userID) + "/channels?include_deleted=true"
+	if err := doGetContext(ctx, serverURL, token, path, &listing); err != nil {
+		return nil, err
+	}
+	if listing == nil {
+		return nil, errors.New("Mattermost channel listing was not an array")
+	}
+	channels := make(map[string]*Channel, len(listing))
+	for _, entry := range listing {
+		if entry.ID == "" || entry.DeleteAt == nil || *entry.DeleteAt < 0 || channels[entry.ID] != nil {
+			return nil, errors.New("invalid entry in Mattermost channel listing")
+		}
+		entry.Channel.DeleteAt = *entry.DeleteAt
+		channels[entry.ID] = &entry.Channel
+	}
+	return channels, nil
+}
+
 // GetChannelMembers returns the member list for a channel (up to 200 per page).
 func GetChannelMembers(serverURL, token, channelID string) ([]*ChannelMember, error) {
 	var members []*ChannelMember
@@ -398,23 +462,42 @@ func GetStatusesByIDs(serverURL, token string, userIDs []string) (map[string]str
 }
 
 func doGet(serverURL, token, path string, out any) error {
-	req, err := http.NewRequest("GET", normalizeURL(serverURL)+path, nil)
+	return doGetContext(context.Background(), serverURL, token, path, out)
+}
+
+func doGetContext(ctx context.Context, serverURL, token, path string, out any) error {
+	return doGetWithRedirectPolicy(ctx, serverURL, token, path, out, false)
+}
+
+// doGetWithRedirectPolicy performs a GET, optionally refusing to follow
+// redirects. Ordinary API GETs keep normal behavior; a request whose answer is
+// used as evidence (does this channel still exist?) must not, or a redirect
+// target could supply the answer instead of Mattermost itself.
+func doGetWithRedirectPolicy(ctx context.Context, serverURL, token, path string, out any, rejectRedirects bool) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, normalizeURL(serverURL)+path, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	resp, err := newClient().Do(req)
+	client := newClient()
+	if rejectRedirects {
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
-		return newHTTPError(resp, path)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
 	}
-
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	if resp.StatusCode != http.StatusOK {
+		return newHTTPErrorFromBody(resp.StatusCode, path, body)
+	}
+	if err := json.Unmarshal(body, out); err != nil {
 		return fmt.Errorf("decode error from %s: %w", path, err)
 	}
 	return nil
