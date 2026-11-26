@@ -24,10 +24,13 @@ import (
 // as typing it in Mattermost does. Anything else starting with "/" is posted
 // as text, so "/usr/bin is full" is not swallowed; "//text" posts "/text".
 //
-// The command's message stays in the Matrix room as the user's record. It has
-// no Mattermost post, so it is saved under a "cmd:" ID that edits, deletes,
-// reactions and replies recognise. Replies only the user can see arrive as
-// ephemeral_message events and are shown as notices from the bridge bot.
+// A command's message is taken back from the Matrix room once Mattermost has
+// run it: it was an instruction, not a message, and left in place it reads as a
+// bare line above the output the command produced. A command that failed stays,
+// so the error remains attached to what was attempted. Neither has a Mattermost
+// post, so it is saved under a "cmd:" ID that edits, deletes, reactions and
+// replies recognise. Replies only the user can see arrive as ephemeral_message
+// events and are shown as notices from the bridge bot.
 
 const commandMessagePrefix = "cmd:"
 
@@ -152,12 +155,42 @@ func (c *MattermostClient) handleSlashCommand(ctx context.Context, msg *bridgev2
 	if resp != nil && resp.GotoLocation != "" {
 		c.queueNotice(msg.Portal.ID, rootID, fmt.Sprintf("Mattermost opened %s", resp.GotoLocation), true)
 	}
-	return &bridgev2.MatrixMessageResponse{
+	out := &bridgev2.MatrixMessageResponse{
 		DB: &database.Message{
 			ID:       networkid.MessageID(commandMessagePrefix + string(msg.Event.ID)),
 			SenderID: networkid.UserID(c.UserID),
 		},
-	}, true, nil
+	}
+	// Take the invocation back only after it is saved: redacted sooner, its own
+	// redaction would arrive before there is a row to match it to.
+	out.PostSave = func(ctx context.Context, _ *database.Message) {
+		c.takeBackCommand(ctx, msg)
+	}
+	return out, true, nil
+}
+
+// takeBackCommand redacts the Matrix event that invoked a command. Failing to
+// redact never fails the command: Mattermost already ran it, and that cannot be
+// undone; the room simply keeps the invocation.
+func (c *MattermostClient) takeBackCommand(ctx context.Context, msg *bridgev2.MatrixMessage) {
+	if msg == nil || msg.Event == nil || msg.Portal == nil {
+		return
+	}
+	var err error
+	switch {
+	case c.redactCommandFn != nil:
+		err = c.redactCommandFn(ctx, msg.Portal.MXID, msg.Event.ID)
+	case msg.Portal.Bridge != nil && msg.Portal.Bridge.Bot != nil:
+		_, err = msg.Portal.Bridge.Bot.SendMessage(ctx, msg.Portal.MXID, event.EventRedaction, &event.Content{
+			Parsed: &event.RedactionEventContent{Redacts: msg.Event.ID},
+		}, nil)
+	default:
+		return
+	}
+	if err != nil {
+		zerolog.Ctx(ctx).Warn().Err(err).Stringer("event_id", msg.Event.ID).
+			Msg("Could not take back the command message")
+	}
 }
 
 // escapedSlash turns "//text" into "/text", Mattermost's way of posting text
