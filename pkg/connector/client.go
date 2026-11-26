@@ -273,10 +273,14 @@ func (c *MattermostClient) channelResyncEvent(ch *mattermost.Channel) *simpleven
 		// Members are fetched when the portal handles the event, not here, so
 		// the websocket loop never waits on the members request.
 		GetChatInfoFunc: func(ctx context.Context, _ *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
+			members := c.chatMembers(ctx, ch) // caches the DM partner's profile
+			// Archived channels are read-only through overrides
+			// (channel_power.go), so the room's own levels are never touched.
+			members.PowerLevels = channelPowerLevels(ch)
 			info := &bridgev2.ChatInfo{
 				Name:        name,
 				Type:        &roomType,
-				Members:     c.chatMembers(ctx, ch), // caches the DM partner's profile
+				Members:     members,
 				CanBackfill: true,
 				ParentID:    c.roomParent(ch), // the team's space, if on (teams.go)
 				UserLocal:   c.userLocalInfo(ch.ID),
@@ -306,7 +310,7 @@ func (c *MattermostClient) Connect(ctx context.Context) {
 	c.startPresencePoller(c.done)
 	go c.runBurnReconcileLoop(c.done, burnReconcileEvery)
 	go c.connectLoop()
-	go c.lifecyclePollLoop()
+	go c.startLifecyclePoll()
 }
 
 func (c *MattermostClient) connectLoop() {
@@ -377,11 +381,10 @@ func (c *MattermostClient) processEvents() {
 			// Restores arrive as a system post; treat it as proof the channel is
 			// alive again so a pending (or already applied) deletion is undone.
 			if evt.Post.Type == "system_channel_restored" {
-				c.noteChannelAlive(evt.ChannelID)
 				// Backstop for a missed channel_restored event: the room must be
 				// writable before the notice below is relayed. Queued first, so
 				// the portal lane applies it before the notice.
-				c.queueAccessSync(evt.ChannelID)
+				c.queueLifecycleCheck(evt.ChannelID, false)
 			}
 			// Pre-seed the channel cache from the inline WS metadata so that
 			// GetChatInfo never races against a concurrent REST fetch.
@@ -528,7 +531,6 @@ func (c *MattermostClient) processEvents() {
 			c.mu.Unlock()
 			// A (re)created channel supersedes any pending deletion verdict and
 			// must be bridgeable again even if its portal was deleted before.
-			c.noteChannelAlive(evt.Channel.ID)
 			c.queueChannelResync(evt.Channel)
 
 		case *mattermost.ChannelUpdatedEvent:
@@ -557,11 +559,10 @@ func (c *MattermostClient) processEvents() {
 		case *mattermost.ChannelRestoredEvent:
 			// Invalidate pending removal checks. The corresponding Mattermost
 			// system post supplies the user-visible message exactly once.
-			c.noteChannelAlive(evt.ChannelID)
 			// Make the room writable again. Queued here, ahead of the restore
 			// post that follows, so the "unarchived" notice (sent from the
 			// user's own account) is not blocked by the read-only levels.
-			c.queueAccessSync(evt.ChannelID)
+			c.queueLifecycleCheck(evt.ChannelID, false)
 
 		case *mattermost.ChannelDeletedEvent:
 			c.mu.Lock()
@@ -572,9 +573,9 @@ func (c *MattermostClient) processEvents() {
 			// The event alone does not prove the channel is gone: Mattermost
 			// sends it for restorable archives too. Verify over REST first and
 			// fail closed on any ambiguous answer.
-			c.handleChannelDeleted(evt.ChannelID)
+			c.queueLifecycleCheck(evt.ChannelID, true)
 			// If it is only archived, the room stays but becomes read-only.
-			c.queueAccessSync(evt.ChannelID)
+			c.queueLifecycleCheck(evt.ChannelID, false)
 
 		case *mattermost.ChannelMemberEvent:
 			c.handleChannelMemberEvent(evt)
@@ -705,7 +706,6 @@ func (c *MattermostClient) syncChannels() {
 			}
 			seenChannels[ch.ID] = true
 			c.queueChannelResync(ch)
-			c.queueAccessSync(ch.ID)
 		}
 	}
 

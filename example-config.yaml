@@ -26,6 +26,11 @@ network:
     # the team. Turning it off moves the channels back out and removes the spaces.
     team_spaces: true
 
+    # Poll for missed archive and restore events at this interval (e.g. 30s).
+    # An empty string disables polling: lifecycle state is then left to the
+    # websocket events alone.
+    channel_poll_interval: ""
+
     # One login per Mattermost team instead of one login for the whole account.
     # Off (the default): one login carries your DMs and the teams you switch on
     # with the "team" bot command; teams start switched off. On: log in once per

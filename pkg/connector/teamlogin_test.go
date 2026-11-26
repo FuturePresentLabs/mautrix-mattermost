@@ -151,6 +151,14 @@ func teamLoginServer() *httptest.Server {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/users/me/teams"):
 			_ = json.NewEncoder(w).Encode(tlTeams)
+		case strings.HasSuffix(r.URL.Path, "/channels") && strings.Contains(r.URL.Path, "/users/"):
+			// The lifecycle poll lists every channel the user belongs to in one
+			// call, archived ones included, and filters by team ownership.
+			_ = json.NewEncoder(w).Encode([]*mattermost.Channel{
+				{ID: "cA", TeamID: "tA", Type: "O", DisplayName: "Town Square"},
+				{ID: "cB", TeamID: "tB", Type: "O", DisplayName: "Town Square"},
+				dm,
+			})
 		case strings.HasSuffix(r.URL.Path, "/teams/tA/channels"):
 			_ = json.NewEncoder(w).Encode([]*mattermost.Channel{{ID: "cA", TeamID: "tA", Type: "O", DisplayName: "Town Square"}, dm})
 		case strings.HasSuffix(r.URL.Path, "/teams/tB/channels"):
@@ -430,7 +438,7 @@ func TestLifecyclePollListsOnlyOwnChannels(t *testing.T) {
 	defer srv.Close()
 	c := scopedClient(&UserLoginMetadata{TeamID: "tB"})
 	c.baseURL = srv.URL
-	got, ok := c.listChannels()
+	got, ok := c.listChannels(t.Context())
 	if !ok || len(got) != 1 || got["cB"] == nil {
 		t.Fatalf("listed %v ok=%v, want only cB", got, ok)
 	}
