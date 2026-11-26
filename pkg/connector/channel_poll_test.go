@@ -85,7 +85,10 @@ func chans(archived ...string) map[string]*mattermost.Channel {
 	return out
 }
 
-func assertResyncPreservesPower(t *testing.T, ev bridgev2.RemoteEvent) {
+// A resync is what carries a channel's lifecycle into the room now: the
+// archived announcement and the restore are applied through the overrides on
+// the chat info, so the room's own power levels are never rewritten.
+func assertResyncPowerLevels(t *testing.T, ev bridgev2.RemoteEvent, want int) {
 	t.Helper()
 	rs, ok := ev.(*simplevent.ChatResync)
 	if !ok {
@@ -95,8 +98,12 @@ func assertResyncPreservesPower(t *testing.T, ev bridgev2.RemoteEvent) {
 	if err != nil || info == nil || info.Members == nil {
 		t.Fatalf("resync has no chat info: %v", err)
 	}
-	if info.Members.PowerLevels != nil {
-		t.Fatal("resync must not override power levels")
+	levels := info.Members.PowerLevels
+	if levels == nil || levels.EventsDefault == nil {
+		t.Fatalf("resync carries no power levels, want events_default %d", want)
+	}
+	if *levels.EventsDefault != want {
+		t.Fatalf("events_default = %d, want %d", *levels.EventsDefault, want)
 	}
 }
 
@@ -122,13 +129,10 @@ func TestPollArchiveLocksAndBackfills(t *testing.T) {
 	r.client.pollChannelLifecycle(snap)
 
 	evs := r.events.drain()
-	if len(evs) != 2 {
-		t.Fatalf("queued %d events, want the access sync and one resync", len(evs))
+	if len(evs) != 1 {
+		t.Fatalf("queued %d events, want one resync carrying the read-only levels", len(evs))
 	}
-	if _, ok := evs[0].(*mmChannelAccessEvent); !ok {
-		t.Errorf("first event is %T, want the access sync", evs[0])
-	}
-	assertResyncPreservesPower(t, evs[1])
+	assertResyncPowerLevels(t, evs[0], archivedChannelEventLevel)
 	if r.reconnect.Load() != 0 {
 		t.Error("archiving must not reconnect the websocket")
 	}
@@ -147,13 +151,10 @@ func TestPollRestoreUnlocksResyncsAndReconnects(t *testing.T) {
 	r.client.pollChannelLifecycle(snap)
 
 	evs := r.events.drain()
-	if len(evs) != 2 {
-		t.Fatalf("queued %d events, want the access sync and one resync", len(evs))
+	if len(evs) != 1 {
+		t.Fatalf("queued %d events, want one resync carrying the writable levels", len(evs))
 	}
-	if _, ok := evs[0].(*mmChannelAccessEvent); !ok {
-		t.Errorf("first event is %T, want the access sync ahead of the resync", evs[0])
-	}
-	assertResyncPreservesPower(t, evs[1])
+	assertResyncPowerLevels(t, evs[0], 0)
 	if r.reconnect.Load() != 1 {
 		t.Errorf("reconnects = %d, want exactly 1: the old connection's snapshot excludes the channel", r.reconnect.Load())
 	}
@@ -235,8 +236,8 @@ func TestPollCoalescesReconnectsAcrossRestores(t *testing.T) {
 	if got := r.reconnect.Load(); got != 1 {
 		t.Fatalf("reconnects = %d for 3 restores in one poll, want exactly 1", got)
 	}
-	if n := len(r.events.accessSyncs()); n != 3 {
-		t.Errorf("access syncs = %d, want one per restored channel (3)", n)
+	if n := len(r.events.refreshes()); n != 0 {
+		t.Errorf("power refreshes = %d, want none: each restore already queues its own resync", n)
 	}
 }
 

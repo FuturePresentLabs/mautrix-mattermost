@@ -156,8 +156,8 @@ func (c *MattermostClient) applyLifecycleTransition(tr lifecycleTransition, ch *
 		Msg("Channel lifecycle change observed by poll")
 	switch tr.Kind {
 	case lifecycleArchived:
-		// Reconcile the journal, then resync to backfill the archive notice.
-		c.queueAccessSync(tr.ChannelID)
+		// Resync so the room picks up the read-only levels and the archive
+		// notice is backfilled.
 		if ch != nil {
 			c.queueChannelResync(ch)
 		}
@@ -166,7 +166,6 @@ func (c *MattermostClient) applyLifecycleTransition(tr lifecycleTransition, ch *
 		// the restore notice and of missed posts), and replace the websocket,
 		// whose snapshot still excludes this channel.
 		c.noteChannelAlive(tr.ChannelID)
-		c.queueAccessSync(tr.ChannelID)
 		if ch != nil {
 			c.queueChannelResync(ch)
 		}

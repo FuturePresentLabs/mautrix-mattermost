@@ -103,7 +103,7 @@ func TestGetAllChannelsIncludingArchivedIncludesArchived(t *testing.T) {
 // the server did not actually give.
 func TestGetAllChannelsIncludingArchivedRejectsUnusableListings(t *testing.T) {
 	cases := map[string]string{
-		"missing delete_at": `[{"id":"a"}]`,
+		"missing delete_at":  `[{"id":"a"}]`,
 		"negative delete_at": `[{"id":"a","delete_at":-1}]`,
 		"blank id":           `[{"id":"","delete_at":0}]`,
 		"duplicate id":       `[{"id":"a","delete_at":0},{"id":"a","delete_at":0}]`,

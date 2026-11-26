@@ -162,8 +162,8 @@ func TestProcessEventsChannelDeletedQueuesNeutralCheckOnly(t *testing.T) {
 	if len(checks) != 1 || checks[0].channelID != "chan-ws" {
 		t.Fatalf("checks = %+v, want one check for chan-ws", checks)
 	}
-	if acc := p.events.accessSyncs(); len(acc) != 1 || acc[0].channelID != "chan-ws" {
-		t.Fatalf("access syncs = %+v, want one for chan-ws", acc)
+	if acc := p.events.refreshes(); len(acc) != 1 || acc[0].channelID != "chan-ws" {
+		t.Fatalf("power refreshes = %+v, want one for chan-ws", acc)
 	}
 	if n := p.probeCount(); n != 0 {
 		t.Errorf("the hint issued %d probes, want 0; the probe belongs to the dequeue", n)

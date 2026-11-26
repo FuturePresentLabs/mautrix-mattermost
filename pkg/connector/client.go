@@ -273,10 +273,14 @@ func (c *MattermostClient) channelResyncEvent(ch *mattermost.Channel) *simpleven
 		// Members are fetched when the portal handles the event, not here, so
 		// the websocket loop never waits on the members request.
 		GetChatInfoFunc: func(ctx context.Context, _ *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
+			members := c.chatMembers(ctx, ch) // caches the DM partner's profile
+			// Archived channels are read-only through overrides
+			// (channel_power.go), so the room's own levels are never touched.
+			members.PowerLevels = channelPowerLevels(ch)
 			info := &bridgev2.ChatInfo{
 				Name:        name,
 				Type:        &roomType,
-				Members:     c.chatMembers(ctx, ch), // caches the DM partner's profile
+				Members:     members,
 				CanBackfill: true,
 				ParentID:    c.roomParent(ch), // the team's space, if on (teams.go)
 				UserLocal:   c.userLocalInfo(ch.ID),
@@ -381,7 +385,7 @@ func (c *MattermostClient) processEvents() {
 				// Backstop for a missed channel_restored event: the room must be
 				// writable before the notice below is relayed. Queued first, so
 				// the portal lane applies it before the notice.
-				c.queueAccessSync(evt.ChannelID)
+				c.queueChannelRefresh(evt.ChannelID)
 			}
 			// Pre-seed the channel cache from the inline WS metadata so that
 			// GetChatInfo never races against a concurrent REST fetch.
@@ -561,7 +565,7 @@ func (c *MattermostClient) processEvents() {
 			// Make the room writable again. Queued here, ahead of the restore
 			// post that follows, so the "unarchived" notice (sent from the
 			// user's own account) is not blocked by the read-only levels.
-			c.queueAccessSync(evt.ChannelID)
+			c.queueChannelRefresh(evt.ChannelID)
 
 		case *mattermost.ChannelDeletedEvent:
 			c.mu.Lock()
@@ -574,7 +578,7 @@ func (c *MattermostClient) processEvents() {
 			// fail closed on any ambiguous answer.
 			c.handleChannelDeleted(evt.ChannelID)
 			// If it is only archived, the room stays but becomes read-only.
-			c.queueAccessSync(evt.ChannelID)
+			c.queueChannelRefresh(evt.ChannelID)
 
 		case *mattermost.ChannelMemberEvent:
 			c.handleChannelMemberEvent(evt)
@@ -705,7 +709,6 @@ func (c *MattermostClient) syncChannels() {
 			}
 			seenChannels[ch.ID] = true
 			c.queueChannelResync(ch)
-			c.queueAccessSync(ch.ID)
 		}
 	}
 

@@ -69,6 +69,10 @@ func (c *MattermostClient) GetChatInfo(ctx context.Context, portal *bridgev2.Por
 		Members: members,
 	}
 	if ok {
+		// An archived channel's room is read-only through overrides, so a
+		// restore is reversible without rewriting the room's own power levels
+		// (channel_power.go).
+		members.PowerLevels = channelPowerLevels(ch)
 		info.ParentID = c.roomParent(ch)
 		info.UserLocal = c.userLocalInfo(ch.ID)
 	}
