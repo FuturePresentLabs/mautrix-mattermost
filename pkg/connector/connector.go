@@ -37,6 +37,9 @@ func (m *MattermostConnector) Start(ctx context.Context) error {
 		if _, err := parseDMStatus(m.Config.DMStatus); err != nil {
 			return fmt.Errorf("network.dm_status: %w", err)
 		}
+		if _, err := m.Config.channelPollInterval(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -123,6 +126,7 @@ func upgradeConfig(helper configupgrade.Helper) {
 	helper.Copy(configupgrade.Bool, "presence", "enabled")
 	helper.Copy(configupgrade.Str, "display_names")
 	helper.Copy(configupgrade.Str, "dm_status")
+	helper.Copy(configupgrade.Str, "channel_poll_interval")
 	helper.Copy(configupgrade.Bool, "team_spaces")
 	helper.Copy(configupgrade.Bool, "team_logins")
 	helper.Copy(configupgrade.Bool, "mute_channels_on_create")
@@ -481,6 +485,11 @@ type Config struct {
 	// TeamSpaces puts each team's channels in a Matrix space for the team
 	// (see teams.go).
 	TeamSpaces bool `yaml:"team_spaces"`
+	// ChannelPollInterval reconciles channel lifecycle state over REST, which
+	// the websocket cannot be trusted to report (see channel_poll.go). Empty
+	// leaves lifecycle state to the websocket events alone; "30s" matches what
+	// the fork did unconditionally.
+	ChannelPollInterval string `yaml:"channel_poll_interval"`
 	// TeamLogins makes each team a separate login (teamlogin.go). Off: one
 	// login per account, with each team switched on or off by the team
 	// command (teamtoggle.go).
@@ -527,6 +536,11 @@ dm_status: all
 # Put each Mattermost team's channels in a Matrix space named and pictured like
 # the team. Turning it off moves the channels back out and removes the spaces.
 team_spaces: true
+
+# Poll for missed archive and restore events at this interval (e.g. 30s).
+# An empty string disables polling: lifecycle state is then left to the
+# websocket events alone.
+channel_poll_interval: ""
 
 # One login per Mattermost team instead of one login for the whole account.
 # Off (the default): one login carries your DMs and the teams you switch on

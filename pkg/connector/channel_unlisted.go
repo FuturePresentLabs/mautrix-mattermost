@@ -66,7 +66,30 @@ func (c *MattermostClient) reconcileUnlistedPortals(listed map[string]bool) {
 			continue
 		}
 		// Absent even from the listing that includes archived channels.
-		c.handleChannelDeleted(id)
+		c.queueLifecycleCheck(id, true)
 	}
 	log.Debug().Int("count", len(ids)).Msg("Reconciled portals missing from the channel listing")
+}
+
+// listChannels returns the channels this login owns, archived ones included.
+//
+// With team logins on, each login bridges its own team only (teamlogin.go), so a
+// channel another login owns must not appear here: the lifecycle poll would
+// otherwise judge, and possibly delete, another login's room.
+func (c *MattermostClient) listChannels(ctx context.Context) (map[string]*mattermost.Channel, bool) {
+	if c.listChannelStatesFn != nil {
+		return c.listChannelStatesFn()
+	}
+	all, err := mattermost.GetAllChannelsIncludingArchived(ctx, c.serverURL(), c.Token, c.UserID)
+	if err != nil {
+		return nil, false
+	}
+	out := make(map[string]*mattermost.Channel, len(all))
+	for id, ch := range all {
+		if !c.ownsChannel(ch) {
+			continue
+		}
+		out[id] = ch
+	}
+	return out, true
 }
