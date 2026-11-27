@@ -59,6 +59,9 @@ func TestChannelLifecycleProbe(t *testing.T) {
 			}
 			login := &bridgev2.UserLogin{UserLogin: &database.UserLogin{}}
 			c := &MattermostClient{UserLogin: login, baseURL: srv.URL, Token: "fixture", UserID: "user", channels: map[string]*mattermost.Channel{"channel": {ID: "channel"}}}
+			// These cases are about the probe's verdict, so the login already
+			// has a room for the channel.
+			c.hasPortalFn = func(string) bool { return true }
 			var got bridgev2.RemoteEventType
 			c.handleChannelLifecycle(context.Background(), "channel", !tc.restore, func(evt bridgev2.RemoteEvent) {
 				got = evt.GetType()

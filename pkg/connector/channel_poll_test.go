@@ -152,6 +152,7 @@ func TestChannelPollLifecycle(t *testing.T) {
 		UserLogin: &bridgev2.UserLogin{UserLogin: &database.UserLogin{}},
 		UserID:    "user", Token: "fixture", baseURL: srv.URL,
 	}
+	c.hasPortalFn = func(string) bool { return true }
 	var queued []queuedEvent
 	queue := func(evt bridgev2.RemoteEvent) {
 		queued = append(queued, queuedEvent{evt.GetPortalKey().ID, evt.GetType()})
@@ -197,6 +198,7 @@ func TestChannelPollCancelsInFlightListing(t *testing.T) {
 		UserLogin: &bridgev2.UserLogin{UserLogin: &database.UserLogin{}},
 		UserID:    "user", Token: "fixture", baseURL: srv.URL,
 	}
+	c.hasPortalFn = func(string) bool { return true }
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -280,6 +282,8 @@ func TestChannelPollRetriesAbsentChannel(t *testing.T) {
 				UserLogin: &bridgev2.UserLogin{UserLogin: &database.UserLogin{}},
 				UserID:    "user", Token: "fixture", baseURL: srv.URL,
 			}
+			// The poll only tracks channels this login bridged, so it has a room.
+			c.hasPortalFn = func(string) bool { return true }
 			var queued []bridgev2.RemoteEventType
 			queue := func(evt bridgev2.RemoteEvent) {
 				if evt.GetPortalKey().ID != "channel" {

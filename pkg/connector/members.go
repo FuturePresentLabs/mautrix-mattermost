@@ -172,6 +172,13 @@ func (c *MattermostClient) handleChannelMemberEvent(evt *mattermost.ChannelMembe
 		}
 		return
 	}
+	// Membership changes only matter for channels this login bridges. A team
+	// login is told about every member event of the account, including
+	// channels of another team; queueing those would materialise a portal for
+	// a chat this login never had.
+	if !c.ownsChannelID(evt.ChannelID) {
+		return
+	}
 	c.queueEvent(c.memberChangeEvent(evt))
 }
 
@@ -180,6 +187,12 @@ func (c *MattermostClient) handleChannelMemberEvent(evt *mattermost.ChannelMembe
 func (c *MattermostClient) joinedChannelResync(channelID string) *simplevent.ChatResync {
 	ch, err := mattermost.GetChannel(c.serverURL(), c.Token, channelID)
 	if err != nil {
+		return nil
+	}
+	// Every login of an account is told about every join, so the login that
+	// does not own the channel's team must not bridge it. Caching it here would
+	// also make the lifecycle poll treat another login's channel as its own.
+	if !c.ownsChannel(ch) {
 		return nil
 	}
 	c.mu.Lock()

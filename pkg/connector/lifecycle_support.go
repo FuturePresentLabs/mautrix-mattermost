@@ -130,6 +130,13 @@ func (c *MattermostClient) queueLifecycleCheck(channelID string, allowDelete boo
 	if channelID == "" {
 		return
 	}
+	// Hints reach every login of the account. Asking about a channel this login
+	// never bridged materialises a portal row for it: the framework inserts the
+	// portal for the event's key before any handler can decide it is not ours.
+	// Without a room there is nothing to refresh or delete anyway.
+	if !c.hasPortal(channelID) {
+		return
+	}
 	c.queueEvent(&mmLifecycleHintEvent{
 		client:      c,
 		portalKey:   networkid.PortalKey{ID: networkid.PortalID(channelID), Receiver: c.receiverID()},
