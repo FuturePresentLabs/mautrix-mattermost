@@ -90,6 +90,13 @@ func (c *MattermostClient) probeChannelLifecycle(ctx context.Context, channelID 
 }
 
 func (c *MattermostClient) deleteLifecycleChannel(channelID string, queue func(bridgev2.RemoteEvent)) {
+	// Every login of an account is told about every channel event, so a login
+	// that never bridged this channel must not act on its deletion: there is no
+	// room to remove, and queueing the delete creates a portal for a chat this
+	// login never had.
+	if !c.hasPortal(channelID) {
+		return
+	}
 	c.mu.Lock()
 	delete(c.channels, channelID)
 	c.mu.Unlock()

@@ -459,6 +459,12 @@ func (c *MattermostClient) processEvents() {
 			if evt.Post == nil {
 				continue
 			}
+			// Deleting a channel also deletes its posts, and every login of the
+			// account is told. Queueing the removal for a channel this login
+			// does not bridge makes the framework insert a portal for it.
+			if !c.ownsChannelID(evt.ChannelID) {
+				continue
+			}
 			c.queueEvent(&simplevent.MessageRemove{
 				EventMeta: simplevent.EventMeta{
 					Type:       bridgev2.RemoteEventMessageRemove,
